@@ -145,12 +145,7 @@ LIST_ITEM_BLOCKED = "⚠️ tijdelijk niet te checken"
 
 def list_item(name: str, start_text: str, current_text: str, target_text: str, store_count: int = 1) -> str:
     stores = f" ({store_count} winkels)" if store_count > 1 else ""
-    return (
-        f"📦 <b>{name}</b>{stores}\n"
-        f"Start: {start_text}\n"
-        f"Nu: {current_text}\n"
-        f"🎯 Doel: {target_text}"
-    )
+    return f"📦 <b>{name}</b>{stores}\nStart {start_text} → Nu {current_text} → 🎯 Doel {target_text}"
 
 
 # --- product detail / price progression -----------------------------------------------
