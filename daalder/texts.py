@@ -143,10 +143,9 @@ LIST_INTRO = "<b>Jouw producten</b> 📦"
 LIST_ITEM_BLOCKED = "⚠️ tijdelijk niet te checken"
 
 
-def list_item(name: str, price_text: str, arrow: str, delta_text: str, store_count: int = 1) -> str:
-    delta = f" {arrow} {delta_text}" if arrow else ""
+def list_item(name: str, start_text: str, current_text: str, target_text: str, store_count: int = 1) -> str:
     stores = f" ({store_count} winkels)" if store_count > 1 else ""
-    return f"📦 <b>{name}</b>{stores}\n{price_text}{delta}"
+    return f"📦 <b>{name}</b>{stores}\nStart {start_text} → Nu {current_text} → 🎯 Doel {target_text}"
 
 
 # --- product detail / price progression -----------------------------------------------

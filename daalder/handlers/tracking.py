@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Optional, Tuple
+from typing import Optional
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ParseMode
@@ -36,17 +36,6 @@ def _group_keyboard(product_id: int, store_count: int) -> InlineKeyboardMarkup:
     rows.append([InlineKeyboardButton(texts.BTN_TARGET, callback_data=f"target:{product_id}")])
     rows.append([InlineKeyboardButton(texts.BTN_REMOVE, callback_data=f"remove:{product_id}")])
     return InlineKeyboardMarkup(rows)
-
-
-def _delta_display(first_price, last_price, currency: str) -> Tuple[str, str]:
-    if first_price is None or last_price is None:
-        return "", ""
-    diff = last_price - first_price
-    if diff > 0:
-        return "▲", texts.format_price(diff, currency)
-    if diff < 0:
-        return "▼", texts.format_price(-diff, currency)
-    return "→", ""
 
 
 async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -256,14 +245,22 @@ async def list_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
     await update.message.reply_html(texts.LIST_INTRO)
     for product in products:
-        arrow, delta_text = _delta_display(product["first_price"], product["cheapest_price"], product["currency"])
         name = texts.escape(product["name"] or texts.UNKNOWN_PRODUCT_NAME)
-        price_text = (
-            texts.format_price(product["cheapest_price"], product["currency"])
+        currency = product["currency"]
+        start_text = (
+            texts.format_price(product["first_price"], currency) if product["first_price"] is not None else "?"
+        )
+        current_text = (
+            texts.format_price(product["cheapest_price"], currency)
             if product["cheapest_price"] is not None
             else "?"
         )
-        line = texts.list_item(name, price_text, arrow, delta_text, store_count=product["store_count"])
+        target_text = (
+            texts.format_price(product["target_price"], currency)
+            if product["target_price"] is not None
+            else texts.TARGET_NOT_SET
+        )
+        line = texts.list_item(name, start_text, current_text, target_text, store_count=product["store_count"])
         if product["last_check_status"] == "blocked":
             line += f"\n{texts.LIST_ITEM_BLOCKED}"
         keyboard = InlineKeyboardMarkup(
