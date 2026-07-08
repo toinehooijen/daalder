@@ -11,7 +11,7 @@ from telegram.constants import ParseMode
 from telegram.ext import ContextTypes
 
 from daalder import config, db, texts
-from daalder.charts import render_history_chart
+from daalder.charts import render_group_chart
 from daalder.scraping import extract_price, get_domain
 from daalder.scraping.structured import parse_price_string
 
@@ -27,35 +27,15 @@ def _extract_url(text: str) -> Optional[str]:
     return match.group(0).rstrip(").,!?\"'")
 
 
-def _product_keyboard(product_id: int) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        [
-            [InlineKeyboardButton(texts.BTN_CHART, callback_data=f"detail:{product_id}")],
-            [
-                InlineKeyboardButton(texts.BTN_TARGET, callback_data=f"target:{product_id}"),
-                InlineKeyboardButton(texts.BTN_REMOVE, callback_data=f"remove:{product_id}"),
-            ],
-            [InlineKeyboardButton(texts.BTN_ADD_STORE, callback_data=f"addurl:{product_id}")],
-        ]
-    )
-
-
-def _detail_keyboard(product_id: int) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        [
-            [
-                InlineKeyboardButton(texts.BTN_TARGET, callback_data=f"target:{product_id}"),
-                InlineKeyboardButton(texts.BTN_REMOVE, callback_data=f"remove:{product_id}"),
-            ],
-            [InlineKeyboardButton(texts.BTN_ADD_STORE, callback_data=f"addurl:{product_id}")],
-        ]
-    )
-
-
-def _child_detail_keyboard(child_id: int) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        [[InlineKeyboardButton(texts.BTN_REMOVE_STORE, callback_data=f"rmurl:{child_id}")]]
-    )
+def _group_keyboard(product_id: int, store_count: int) -> InlineKeyboardMarkup:
+    rows = [[InlineKeyboardButton(texts.BTN_ADD_STORE, callback_data=f"addurl:{product_id}")]]
+    if store_count > 1:
+        rows.append(
+            [InlineKeyboardButton(texts.BTN_REMOVE_STORE_PROMPT, callback_data=f"rmstore_prompt:{product_id}")]
+        )
+    rows.append([InlineKeyboardButton(texts.BTN_TARGET, callback_data=f"target:{product_id}")])
+    rows.append([InlineKeyboardButton(texts.BTN_REMOVE, callback_data=f"remove:{product_id}")])
+    return InlineKeyboardMarkup(rows)
 
 
 def _delta_display(first_price, last_price, currency: str) -> Tuple[str, str]:
@@ -143,7 +123,7 @@ async def _handle_add_product(update: Update, context: ContextTypes.DEFAULT_TYPE
     name = texts.escape(product["name"] or texts.UNKNOWN_PRODUCT_NAME)
     text = texts.product_added(name, texts.format_price(result.price, result.currency))
     await placeholder.edit_text(
-        text, parse_mode=ParseMode.HTML, reply_markup=_product_keyboard(product["id"])
+        text, parse_mode=ParseMode.HTML, reply_markup=_group_keyboard(product["id"], store_count=1)
     )
 
 
@@ -217,9 +197,10 @@ async def _handle_add_url_to_product(
         await placeholder.edit_text(texts.PRODUCT_NOT_FOUND, parse_mode=ParseMode.HTML)
         return
 
+    store_count = await db.count_product_urls(product_id)
     text = texts.url_added(domain, texts.format_price(result.price, result.currency))
     await placeholder.edit_text(
-        text, parse_mode=ParseMode.HTML, reply_markup=_product_keyboard(product_id)
+        text, parse_mode=ParseMode.HTML, reply_markup=_group_keyboard(product_id, store_count)
     )
 
 
@@ -228,15 +209,40 @@ async def remove_url_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     await query.answer()
     url_id = int(query.data.split(":", 1)[1])
     user = update.effective_user
-    row = await db.get_owned_product(url_id, user.id)
-    if row is None:
+    removed = await db.remove_store(url_id, user.id)
+    if removed is None:
         await query.message.reply_html(texts.PRODUCT_NOT_FOUND)
         return
-    if row["parent_product_id"] is None:
-        await query.message.reply_html(texts.REMOVE_URL_ONLY_ROOT_HINT)
+    await query.edit_message_text(texts.remove_url_done(removed["domain"]), parse_mode=ParseMode.HTML)
+
+
+async def remove_store_prompt_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    product_id = int(query.data.split(":", 1)[1])
+    user_id = update.effective_user.id
+    product = await db.get_owned_product(product_id, user_id)
+    product = await _resolve_root(product)
+    if product is None:
+        await query.message.reply_html(texts.PRODUCT_NOT_FOUND)
         return
-    await db.remove_product_url(url_id, user.id)
-    await query.edit_message_text(texts.remove_url_done(row["domain"]), parse_mode=ParseMode.HTML)
+
+    children = await db.get_child_urls(product["id"])
+    stores = [product] + list(children)
+    if len(stores) <= 1:
+        await query.message.reply_html(texts.remove_store_only_one_hint())
+        return
+
+    buttons = [
+        [
+            InlineKeyboardButton(
+                f"🗑 {store['domain']} — {texts.format_price(store['last_price'], store['currency'])}",
+                callback_data=f"rmurl:{store['id']}",
+            )
+        ]
+        for store in stores
+    ]
+    await query.message.reply_html(texts.remove_store_prompt(), reply_markup=InlineKeyboardMarkup(buttons))
 
 
 async def list_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -273,53 +279,51 @@ async def detail_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     user_id = update.effective_user.id
 
     product = await db.get_owned_product(product_id, user_id)
+    product = await _resolve_root(product)
     if product is None:
         await query.message.reply_html(texts.PRODUCT_NOT_FOUND)
         return
 
-    is_child = product["parent_product_id"] is not None
-    keyboard = _child_detail_keyboard(product_id) if is_child else _detail_keyboard(product_id)
+    root_id = product["id"]
+    name = texts.escape(product["name"] or texts.UNKNOWN_PRODUCT_NAME)
+    currency = product["currency"]
 
-    points = await db.get_price_points(product_id)
-    name = product["name"] or texts.UNKNOWN_PRODUCT_NAME
+    children = await db.get_child_urls(root_id)
+    stores = [product] + list(children)
+    store_lines = [
+        (
+            store["domain"],
+            texts.format_price(store["last_price"], store["currency"])
+            if store["last_price"] is not None
+            else "?",
+        )
+        for store in stores
+    ]
 
-    if len(points) < 2:
-        await query.message.reply_html(texts.CHART_NOT_ENOUGH_DATA, reply_markup=keyboard)
+    prices = await db.get_group_prices(root_id)
+    cheapest_text = texts.format_price(prices["cheapest"], currency)
+    average_text = texts.format_price(prices["average"], currency)
+    target_text = (
+        texts.format_price(product["target_price"], currency)
+        if product["target_price"] is not None
+        else texts.TARGET_NOT_SET
+    )
+
+    points = await db.get_group_price_points(root_id)
+    series: dict[str, list] = {}
+    for point in points:
+        series.setdefault(point["domain"], []).append((point["checked_at"], point["price"]))
+    chart = render_group_chart(product["name"] or texts.UNKNOWN_PRODUCT_NAME, series)
+
+    text = texts.group_detail_text(
+        name, store_lines, cheapest_text, average_text, target_text, enough_data=chart is not None
+    )
+    keyboard = _group_keyboard(root_id, store_count=len(stores))
+
+    if chart is not None:
+        await query.message.reply_photo(photo=chart, caption=text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
     else:
-        prices = [p["price"] for p in points]
-        lowest = min(prices)
-        chart = render_history_chart(name, [(p["checked_at"], p["price"]) for p in points])
-        caption = texts.detail_caption(
-            texts.escape(name),
-            texts.format_price(product["last_price"], product["currency"]),
-            texts.format_price(lowest, product["currency"]),
-        )
-        await query.message.reply_photo(
-            photo=chart,
-            caption=caption,
-            parse_mode=ParseMode.HTML,
-            reply_markup=keyboard,
-        )
-
-    if not is_child:
-        children = await db.get_child_urls(product_id)
-        for child in children:
-            price_text = (
-                texts.format_price(child["last_price"], child["currency"])
-                if child["last_price"] is not None
-                else "?"
-            )
-            child_keyboard = InlineKeyboardMarkup(
-                [
-                    [
-                        InlineKeyboardButton(texts.BTN_DETAIL, callback_data=f"detail:{child['id']}"),
-                        InlineKeyboardButton(texts.BTN_REMOVE_STORE, callback_data=f"rmurl:{child['id']}"),
-                    ]
-                ]
-            )
-            await query.message.reply_html(
-                texts.store_list_item(child["domain"], price_text), reply_markup=child_keyboard
-            )
+        await query.message.reply_html(text, reply_markup=keyboard)
 
 
 async def _resolve_root(product):
@@ -354,9 +358,10 @@ async def _handle_target_price_reply(update: Update, context: ContextTypes.DEFAU
         await update.message.reply_html(texts.PRODUCT_NOT_FOUND)
         return
 
+    store_count = await db.count_product_urls(product_id)
     await update.message.reply_html(
         texts.target_set(texts.format_price(price, updated["currency"])),
-        reply_markup=_detail_keyboard(product_id),
+        reply_markup=_group_keyboard(product_id, store_count),
     )
 
 
