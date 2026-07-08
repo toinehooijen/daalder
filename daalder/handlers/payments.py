@@ -77,9 +77,10 @@ async def upgrade_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     user_id = update.effective_user.id
 
     if kind == "monthly":
+        # Telegram Stars subscriptions can only be created via an invoice
+        # link — sendInvoice has no subscription_period parameter.
         payload = f"{_PAYLOAD_MONTHLY}:{user_id}:{uuid.uuid4().hex}"
-        await context.bot.send_invoice(
-            chat_id=chat_id,
+        link = await context.bot.create_invoice_link(
             title=texts.INVOICE_TITLE_MONTHLY,
             description=texts.INVOICE_DESC_MONTHLY,
             payload=payload,
@@ -87,6 +88,13 @@ async def upgrade_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             currency="XTR",
             prices=[LabeledPrice(texts.INVOICE_TITLE_MONTHLY, config.MONTHLY_STARS)],
             subscription_period=config.MONTHLY_SUBSCRIPTION_PERIOD_SECONDS,
+        )
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=texts.INVOICE_TITLE_MONTHLY,
+            reply_markup=InlineKeyboardMarkup(
+                [[InlineKeyboardButton(texts.upgrade_button_monthly(config.MONTHLY_STARS), url=link)]]
+            ),
         )
     else:
         payload = f"{_PAYLOAD_ANNUAL}:{user_id}:{uuid.uuid4().hex}"

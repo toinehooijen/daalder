@@ -116,3 +116,23 @@ async def check_lapsed_plans_job(context: ContextTypes.DEFAULT_TYPE) -> None:
             await context.bot.send_message(user["telegram_user_id"], texts.PLAN_LAPSED, parse_mode=ParseMode.HTML)
         except Exception:
             logger.exception("Kon verlopen abonnement niet afhandelen voor %s", user["telegram_user_id"])
+
+
+async def send_renewal_reminders_job(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Annual Plus is a one-off Stars payment (Telegram doesn't support yearly
+    recurring subscriptions), so nudge users to manually renew before it lapses."""
+    try:
+        users = await db.get_users_due_for_renewal_reminder(config.RENEWAL_REMINDER_DAYS_BEFORE)
+    except Exception:
+        logger.exception("Kon abonnementen voor verlengingsherinnering niet ophalen")
+        return
+
+    for user in users:
+        expires_text = user["plan_expires_at"].strftime("%d-%m-%Y")
+        try:
+            await context.bot.send_message(
+                user["telegram_user_id"], texts.renewal_reminder(expires_text), parse_mode=ParseMode.HTML
+            )
+            await db.mark_renewal_reminder_sent(user["telegram_user_id"])
+        except Exception:
+            logger.exception("Kon verlengingsherinnering niet versturen naar %s", user["telegram_user_id"])
