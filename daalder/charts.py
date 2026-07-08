@@ -43,17 +43,17 @@ def render_group_chart(
         else:
             ax.scatter(dates, prices, zorder=5, label=domain)
 
-    ax.set_title(product_name[:60], fontsize=11)
     ax.set_ylabel("Prijs (€)")
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%d-%m"))
     fig.autofmt_xdate()
     ax.legend(loc="best", fontsize=8, frameon=False)
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
-    fig.tight_layout()
+    ax.margins(x=0.15, y=0.2)
+    fig.tight_layout(pad=2.0)
 
     buffer = io.BytesIO()
-    fig.savefig(buffer, format="png")
+    fig.savefig(buffer, format="png", transparent=True)
     plt.close(fig)
     buffer.seek(0)
     buffer.name = "prijsverloop.png"
