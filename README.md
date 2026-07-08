@@ -5,9 +5,12 @@ messages you when the price drops. The bot is the entire product — there is
 no web frontend and no separate app.
 
 - Paste a product URL into the chat and Daalder starts tracking it.
-- Free: track 1 product, checked every 24h.
-- **Daalder Plus**: unlimited products, checked every 4h. €2/month
-  (recurring) or €12/year (one-off), paid in Telegram Stars.
+- Add more store URLs to the same product ("➕ Andere winkel toevoegen") to
+  track the same deal across multiple webshops as one group; Daalder shows
+  the cheapest current price and still alerts on a drop at any single store.
+- Free: track 1 product (up to 2 stores per product), checked every 24h.
+- **Daalder Plus**: unlimited products and stores per product, checked every
+  4h. €2/month (recurring) or €12/year (one-off), paid in Telegram Stars.
 
 Single Python process, polling mode, `python-telegram-bot`'s `JobQueue` for
 scheduling. No FastAPI, no Redis, no Celery, no webhook server.

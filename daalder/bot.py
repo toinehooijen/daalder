@@ -77,6 +77,8 @@ def build_application() -> Application:
     application.add_handler(CallbackQueryHandler(tracking_handlers.remove_prompt_callback, pattern=r"^remove:\d+$"))
     application.add_handler(CallbackQueryHandler(tracking_handlers.remove_confirm_callback, pattern=r"^remove_yes:\d+$"))
     application.add_handler(CallbackQueryHandler(tracking_handlers.remove_cancel_callback, pattern=r"^remove_no:\d+$"))
+    application.add_handler(CallbackQueryHandler(tracking_handlers.addurl_prompt_callback, pattern=r"^addurl:\d+$"))
+    application.add_handler(CallbackQueryHandler(tracking_handlers.remove_url_callback, pattern=r"^rmurl:\d+$"))
     application.add_handler(CallbackQueryHandler(payment_handlers.upgrade_callback, pattern=r"^upgrade_(monthly|annual)$"))
     application.add_handler(CallbackQueryHandler(payment_handlers.go_upgrade_callback, pattern=r"^go_upgrade$"))
 
