@@ -43,7 +43,6 @@ def render_group_chart(
         else:
             ax.scatter(dates, prices, zorder=5, label=domain)
 
-    ax.set_title(product_name[:60], fontsize=11)
     ax.set_ylabel("Prijs (€)")
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%d-%m"))
     fig.autofmt_xdate()
