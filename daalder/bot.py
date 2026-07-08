@@ -99,6 +99,12 @@ def build_application() -> Application:
         first=45,
         name="check_lapsed_plans",
     )
+    job_queue.run_repeating(
+        scheduler.send_renewal_reminders_job,
+        interval=config.LAPSE_CHECK_INTERVAL_HOURS * 3600,
+        first=60,
+        name="send_renewal_reminders",
+    )
 
     return application
 

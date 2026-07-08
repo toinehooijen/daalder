@@ -184,8 +184,15 @@ this up we checked the current behavior rather than assuming:
   on `plan_expires_at`: a monthly grant sets it 31 days out (one day of
   grace beyond the 30-day billing period); a renewal payment pushes it out
   another 31 days; a daily job (`check_lapsed_plans_job`) demotes anyone
-  whose `plan_expires_at` has passed back to `free`. This also covers the
-  one-off annual plan, which has no renewal at all.
+  whose `plan_expires_at` has passed back to `free`.
+- The annual plan is a one-off payment — Telegram Stars subscriptions only
+  support the fixed 30-day billing period above, there's no yearly
+  auto-renewal on the platform. `send_renewal_reminders_job` runs daily
+  alongside the lapse job and nudges anyone within
+  `RENEWAL_REMINDER_DAYS_BEFORE` days (default 7) of their annual
+  `plan_expires_at` to renew manually via `/upgrade`; `users.
+  renewal_reminder_sent` stops it from repeating and is cleared on every
+  `grant_plus`/`revoke_plus` call.
 
 On lapse, products are never deleted — they stay stored, but only the
 single most-recently-added active product per free-tier user gets rechecked

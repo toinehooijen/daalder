@@ -42,9 +42,11 @@ SCHEMA_STATEMENTS = [
         is_recurring BOOLEAN NOT NULL DEFAULT FALSE,
         telegram_charge_id TEXT NULL,
         language TEXT NOT NULL DEFAULT 'nl',
+        renewal_reminder_sent BOOLEAN NOT NULL DEFAULT FALSE,
         created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     )
     """,
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS renewal_reminder_sent BOOLEAN NOT NULL DEFAULT FALSE",
     """
     CREATE TABLE IF NOT EXISTS products (
         id BIGSERIAL PRIMARY KEY,
@@ -121,7 +123,8 @@ async def set_plan(
             SET plan = $2,
                 plan_expires_at = $3,
                 is_recurring = $4,
-                telegram_charge_id = COALESCE($5, telegram_charge_id)
+                telegram_charge_id = COALESCE($5, telegram_charge_id),
+                renewal_reminder_sent = false
             WHERE telegram_user_id = $1
             """,
             telegram_user_id,
@@ -139,6 +142,31 @@ async def get_expired_plus_users() -> list[asyncpg.Record]:
             SELECT * FROM users
             WHERE plan = 'plus' AND plan_expires_at IS NOT NULL AND plan_expires_at < now()
             """
+        )
+
+
+async def get_users_due_for_renewal_reminder(days_before: int) -> list[asyncpg.Record]:
+    """Non-recurring (annual) Plus users whose plan expires within `days_before`
+    days and who haven't been reminded yet for this expiry."""
+    async with pool().acquire() as conn:
+        return await conn.fetch(
+            """
+            SELECT * FROM users
+            WHERE plan = 'plus'
+            AND is_recurring = false
+            AND renewal_reminder_sent = false
+            AND plan_expires_at IS NOT NULL
+            AND plan_expires_at BETWEEN now() AND now() + ($1 * INTERVAL '1 day')
+            """,
+            days_before,
+        )
+
+
+async def mark_renewal_reminder_sent(telegram_user_id: int) -> None:
+    async with pool().acquire() as conn:
+        await conn.execute(
+            "UPDATE users SET renewal_reminder_sent = true WHERE telegram_user_id = $1",
+            telegram_user_id,
         )
 
 

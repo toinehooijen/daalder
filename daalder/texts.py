@@ -161,6 +161,14 @@ PLAN_LAPSED = (
     "upgrade om ze weer allemaal te volgen. /upgrade"
 )
 
+
+def renewal_reminder(expires_text: str) -> str:
+    return (
+        f"⭐️ Je jaarlijkse Daalder Plus-abonnement verloopt op {expires_text}. "
+        "Verleng het via /upgrade om onbeperkt producten te blijven volgen."
+    )
+
+
 # --- payments --------------------------------------------------------------------------------------
 
 UPGRADE_INTRO = (
