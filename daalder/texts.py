@@ -113,28 +113,28 @@ def url_added(domain: str, price_text: str) -> str:
     return f"✅ {domain} toegevoegd — {price_text}. Ik laat het weten zodra een van de winkels goedkoper wordt. 📉"
 
 
-REMOVE_URL_ONLY_ROOT_HINT = "Dit is de winkel waarmee je begon. Gebruik de knop 🗑 Verwijderen om het hele product te stoppen."
-
-
 def remove_url_done(domain: str) -> str:
     return f"🗑 {domain} niet meer gevolgd."
 
 
-def store_list_item(domain: str, price_text: str) -> str:
-    return f"🏬 <b>{escape(domain)}</b>\n{price_text}"
+def remove_store_only_one_hint() -> str:
+    return "Dit is je enige winkel. Gebruik 🗑 Product verwijderen om te stoppen met volgen."
+
+
+def remove_store_prompt() -> str:
+    return "Welke winkel wil je niet meer volgen?"
 
 
 # --- buttons ---------------------------------------------------------------------
 
 BTN_UPGRADE = "⭐️ Upgraden"
-BTN_CHART = "📊 Prijsverloop"
 BTN_TARGET = "🎯 Doelprijs"
-BTN_REMOVE = "🗑 Verwijderen"
+BTN_REMOVE = "🗑 Product verwijderen"
 BTN_DETAIL = "📊 Bekijken"
 BTN_REMOVE_CONFIRM = "🗑 Ja, verwijderen"
 BTN_REMOVE_CANCEL = "Annuleren"
 BTN_ADD_STORE = "➕ Andere winkel toevoegen"
-BTN_REMOVE_STORE = "🗑 Deze winkel niet meer volgen"
+BTN_REMOVE_STORE_PROMPT = "🗑 Winkel verwijderen"
 
 # --- /lijst ------------------------------------------------------------------------
 
@@ -154,8 +154,27 @@ def list_item(name: str, price_text: str, arrow: str, delta_text: str, store_cou
 CHART_NOT_ENOUGH_DATA = "Nog te weinig data voor een grafiek — kom later terug. 📉"
 
 
-def detail_caption(name: str, current_price: str, lowest_price: str) -> str:
-    return f"<b>{name}</b>\nHuidige prijs: {current_price}\nLaagste prijs ooit: {lowest_price}"
+def group_detail_text(
+    name: str,
+    stores: list[tuple[str, str]],
+    cheapest_text: str,
+    average_text: str,
+    target_text: str,
+    enough_data: bool,
+) -> str:
+    lines = [f"📦 <b>{name}</b>", ""]
+    lines.extend(f"🏬 {escape(domain)} — {price_text}" for domain, price_text in stores)
+    lines.append("")
+    lines.append(f"💰 Goedkoopste: {cheapest_text}")
+    lines.append(f"📊 Gemiddelde: {average_text}")
+    lines.append(f"🎯 Doelprijs: {target_text}")
+    if not enough_data:
+        lines.append("")
+        lines.append(CHART_NOT_ENOUGH_DATA)
+    return "\n".join(lines)
+
+
+TARGET_NOT_SET = "nog niet ingesteld"
 
 
 PRODUCT_NOT_FOUND = "Ik kon dit product niet vinden. Misschien is het al verwijderd."

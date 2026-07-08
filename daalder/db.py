@@ -339,6 +339,32 @@ async def list_products(user_id: int) -> list[asyncpg.Record]:
         )
 
 
+async def get_group_prices(product_id: int) -> asyncpg.Record:
+    async with pool().acquire() as conn:
+        return await conn.fetchrow(
+            """
+            SELECT MIN(last_price) AS cheapest, AVG(last_price) AS average
+            FROM products
+            WHERE (id = $1 OR parent_product_id = $1) AND active = true
+            """,
+            product_id,
+        )
+
+
+async def get_group_price_points(product_id: int) -> list[asyncpg.Record]:
+    async with pool().acquire() as conn:
+        return await conn.fetch(
+            """
+            SELECT pr.domain, pp.checked_at, pp.price
+            FROM price_points pp
+            JOIN products pr ON pr.id = pp.product_id
+            WHERE pr.id = $1 OR pr.parent_product_id = $1
+            ORDER BY pp.checked_at ASC
+            """,
+            product_id,
+        )
+
+
 async def set_target_price(product_id: int, user_id: int, target_price: Decimal) -> Optional[asyncpg.Record]:
     async with pool().acquire() as conn:
         return await conn.fetchrow(
@@ -364,18 +390,57 @@ async def deactivate_product(product_id: int, user_id: int) -> bool:
         return len(rows) > 0
 
 
-async def remove_product_url(product_id: int, user_id: int) -> Optional[asyncpg.Record]:
-    """Deactivate a single child store URL. Never removes a group root."""
+async def remove_store(product_id: int, user_id: int) -> Optional[asyncpg.Record]:
+    """Deactivate one store URL from a group.
+
+    If it's a child row, simply deactivate it. If it's the group root,
+    promote the oldest remaining active child to root (carrying over the
+    target price and reparenting any siblings) before deactivating the old
+    root row, so the rest of the group keeps being tracked as one product.
+    Falls back to deactivating the whole group if the root has no other
+    active stores left.
+    """
     async with pool().acquire() as conn:
-        return await conn.fetchrow(
-            """
-            UPDATE products SET active = false
-            WHERE id = $1 AND user_id = $2 AND parent_product_id IS NOT NULL
-            RETURNING id, domain
-            """,
-            product_id,
-            user_id,
-        )
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                "SELECT * FROM products WHERE id = $1 AND user_id = $2 AND active = true",
+                product_id,
+                user_id,
+            )
+            if row is None:
+                return None
+
+            if row["parent_product_id"] is not None:
+                await conn.execute("UPDATE products SET active = false WHERE id = $1", row["id"])
+                return row
+
+            new_root = await conn.fetchrow(
+                """
+                SELECT * FROM products
+                WHERE parent_product_id = $1 AND active = true
+                ORDER BY created_at ASC LIMIT 1
+                """,
+                row["id"],
+            )
+            if new_root is None:
+                await conn.execute(
+                    "UPDATE products SET active = false WHERE id = $1 OR parent_product_id = $1",
+                    row["id"],
+                )
+                return row
+
+            await conn.execute(
+                "UPDATE products SET parent_product_id = NULL, target_price = $2 WHERE id = $1",
+                new_root["id"],
+                row["target_price"],
+            )
+            await conn.execute(
+                "UPDATE products SET parent_product_id = $1 WHERE parent_product_id = $2",
+                new_root["id"],
+                row["id"],
+            )
+            await conn.execute("UPDATE products SET active = false WHERE id = $1", row["id"])
+            return row
 
 
 async def get_due_products(free_hours: int, plus_hours: int) -> list[asyncpg.Record]:
@@ -466,9 +531,3 @@ async def set_notified_price(product_id: int, price: Decimal) -> None:
         )
 
 
-async def get_price_points(product_id: int) -> list[asyncpg.Record]:
-    async with pool().acquire() as conn:
-        return await conn.fetch(
-            "SELECT price, checked_at FROM price_points WHERE product_id = $1 ORDER BY checked_at ASC",
-            product_id,
-        )

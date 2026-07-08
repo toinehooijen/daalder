@@ -97,7 +97,7 @@ async def _send_drop_alert(context: ContextTypes.DEFAULT_TYPE, product: Any, old
     new_text = texts.format_price(new_price, product["currency"])
     domain = product["domain"] if product["is_multi_store"] else None
     text = texts.drop_alert(name, old_text, new_text, product["url"], domain=domain)
-    keyboard = InlineKeyboardMarkup([[InlineKeyboardButton(texts.BTN_CHART, callback_data=f"detail:{product['id']}")]])
+    keyboard = InlineKeyboardMarkup([[InlineKeyboardButton(texts.BTN_DETAIL, callback_data=f"detail:{product['id']}")]])
     try:
         await context.bot.send_message(product["user_id"], text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
     except Exception:
