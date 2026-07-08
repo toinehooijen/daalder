@@ -321,7 +321,12 @@ async def detail_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     keyboard = _group_keyboard(root_id, store_count=len(stores))
 
     if chart is not None:
-        await query.message.reply_photo(photo=chart, caption=text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
+        # Telegram re-encodes photos as JPEG (dropping the alpha channel), which
+        # turns the chart's transparent background opaque white. Sending as a
+        # document preserves the original PNG, transparency included.
+        await query.message.reply_document(
+            document=chart, caption=text, parse_mode=ParseMode.HTML, reply_markup=keyboard
+        )
     else:
         await query.message.reply_html(text, reply_markup=keyboard)
 
