@@ -78,6 +78,7 @@ SCHEMA_STATEMENTS = [
     "CREATE INDEX IF NOT EXISTS idx_products_active_checked ON products(active, last_checked_at)",
     "ALTER TABLE products ADD COLUMN IF NOT EXISTS parent_product_id BIGINT NULL REFERENCES products(id)",
     "CREATE INDEX IF NOT EXISTS idx_products_parent ON products(parent_product_id)",
+    "ALTER TABLE products ADD COLUMN IF NOT EXISTS target_price_set_at TIMESTAMPTZ NULL",
 ]
 
 
@@ -343,11 +344,34 @@ async def get_group_prices(product_id: int) -> asyncpg.Record:
     async with pool().acquire() as conn:
         return await conn.fetchrow(
             """
-            SELECT MIN(last_price) AS cheapest, AVG(last_price) AS average
+            SELECT MIN(last_price) AS cheapest, AVG(last_price) AS average,
+                (
+                    SELECT domain FROM products
+                    WHERE (id = $1 OR parent_product_id = $1) AND active = true
+                    ORDER BY last_price ASC NULLS LAST LIMIT 1
+                ) AS cheapest_domain
             FROM products
             WHERE (id = $1 OR parent_product_id = $1) AND active = true
             """,
             product_id,
+        )
+
+
+async def get_lowest_price_since(product_id: int, since: datetime) -> Optional[asyncpg.Record]:
+    """The lowest recorded price (and where/when) across a group's stores
+    since the given timestamp, e.g. since a price alert was set."""
+    async with pool().acquire() as conn:
+        return await conn.fetchrow(
+            """
+            SELECT pp.price, pr.domain, pp.checked_at
+            FROM price_points pp
+            JOIN products pr ON pr.id = pp.product_id
+            WHERE (pr.id = $1 OR pr.parent_product_id = $1) AND pp.checked_at >= $2
+            ORDER BY pp.price ASC, pp.checked_at ASC
+            LIMIT 1
+            """,
+            product_id,
+            since,
         )
 
 
@@ -368,7 +392,7 @@ async def get_group_price_points(product_id: int) -> list[asyncpg.Record]:
 async def set_target_price(product_id: int, user_id: int, target_price: Decimal) -> Optional[asyncpg.Record]:
     async with pool().acquire() as conn:
         return await conn.fetchrow(
-            "UPDATE products SET target_price = $3 WHERE id = $1 AND user_id = $2 RETURNING *",
+            "UPDATE products SET target_price = $3, target_price_set_at = now() WHERE id = $1 AND user_id = $2 RETURNING *",
             product_id,
             user_id,
             target_price,
@@ -430,9 +454,10 @@ async def remove_store(product_id: int, user_id: int) -> Optional[asyncpg.Record
                 return row
 
             await conn.execute(
-                "UPDATE products SET parent_product_id = NULL, target_price = $2 WHERE id = $1",
+                "UPDATE products SET parent_product_id = NULL, target_price = $2, target_price_set_at = $3 WHERE id = $1",
                 new_root["id"],
                 row["target_price"],
+                row["target_price_set_at"],
             )
             await conn.execute(
                 "UPDATE products SET parent_product_id = $1 WHERE parent_product_id = $2",

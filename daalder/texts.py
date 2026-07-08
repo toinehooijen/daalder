@@ -158,16 +158,31 @@ def group_detail_text(
     name: str,
     stores: list[tuple[str, str]],
     cheapest_text: str,
+    cheapest_domain: str,
     average_text: str,
     target_text: str,
     enough_data: bool,
+    lowest_since_alert: Optional[tuple[str, str, str]] = None,
 ) -> str:
     lines = [f"📦 <b>{name}</b>", ""]
-    lines.extend(f"🏬 {escape(domain)} — {price_text}" for domain, price_text in stores)
-    lines.append("")
-    lines.append(f"💰 Goedkoopste: {cheapest_text}")
-    lines.append(f"📊 Gemiddelde: {average_text}")
+    single_store = len(stores) <= 1
+    if single_store:
+        current_text = stores[0][1] if stores else "?"
+        lines.append(f"💰 Huidige prijs: {current_text}")
+    else:
+        lines.extend(f"🏬 {escape(domain)} — {price_text}" for domain, price_text in stores)
+        lines.append("")
+        lines.append(f"💰 Goedkoopste winkel: {escape(cheapest_domain)} — {cheapest_text}")
+        lines.append(f"📊 Gemiddelde: {average_text}")
     lines.append(f"🎯 Doelprijs: {target_text}")
+    if lowest_since_alert is not None:
+        price_text, domain, date_text = lowest_since_alert
+        if single_store:
+            lines.append(f"📉 Laagste prijs sinds instellen prijsalert: {price_text} op {date_text}")
+        else:
+            lines.append(
+                f"📉 Laagste prijs sinds instellen prijsalert: {price_text} bij {escape(domain)} op {date_text}"
+            )
     if not enough_data:
         lines.append("")
         lines.append(CHART_NOT_ENOUGH_DATA)
