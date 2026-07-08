@@ -71,6 +71,7 @@ def build_application() -> Application:
     application.add_handler(CommandHandler("upgrade", payment_handlers.upgrade_command))
     application.add_handler(CommandHandler("paysupport", payment_handlers.paysupport_command))
     application.add_handler(CommandHandler("refund", payment_handlers.refund_command))
+    application.add_handler(CommandHandler("grantplus", payment_handlers.grantplus_command))
 
     application.add_handler(CallbackQueryHandler(tracking_handlers.detail_callback, pattern=r"^detail:\d+$"))
     application.add_handler(CallbackQueryHandler(tracking_handlers.target_prompt_callback, pattern=r"^target:\d+$"))
