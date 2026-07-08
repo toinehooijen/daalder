@@ -180,3 +180,32 @@ async def refund_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     await revoke_plus(target_user_id)
     await update.message.reply_html(texts.REFUND_SUCCESS.format(user_id=target_user_id))
+
+
+async def grantplus_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not config.ADMIN_USER_ID or update.effective_user.id != config.ADMIN_USER_ID:
+        await update.message.reply_html(texts.ADMIN_ONLY)
+        return
+
+    if len(context.args) != 2:
+        await update.message.reply_html(texts.GRANTPLUS_USAGE)
+        return
+
+    try:
+        target_user_id = int(context.args[0])
+        days = int(context.args[1])
+    except ValueError:
+        await update.message.reply_html(texts.GRANTPLUS_USAGE)
+        return
+
+    if days <= 0:
+        await update.message.reply_html(texts.GRANTPLUS_USAGE)
+        return
+
+    await db.get_or_create_user(target_user_id)
+    await grant_plus(target_user_id, days=days, recurring=False, charge_id=None)
+
+    expires_at = datetime.now(timezone.utc) + timedelta(days=days)
+    await update.message.reply_html(
+        texts.GRANTPLUS_SUCCESS.format(user_id=target_user_id, expires=expires_at.strftime("%d-%m-%Y"))
+    )

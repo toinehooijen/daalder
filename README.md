@@ -86,7 +86,7 @@ paysupport - Hulp bij betalingen
 over - Welke gegevens ik bewaar
 ```
 
-(`/refund` is an admin-only command and is intentionally not listed here.)
+(`/refund` and `/grantplus` are admin-only commands and are intentionally not listed here.)
 
 ## Deploying to Railway (worker service)
 

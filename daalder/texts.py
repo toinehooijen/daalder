@@ -279,6 +279,8 @@ REFUND_NO_USER = "Onbekende gebruiker of geen betaalgeschiedenis gevonden."
 REFUND_SUCCESS = "✅ Terugbetaling verwerkt voor gebruiker {user_id}."
 REFUND_FAILED = "❌ Terugbetaling mislukt: {error}"
 ADMIN_ONLY = "Dit commando is alleen voor de beheerder."
+GRANTPLUS_USAGE = "Gebruik: /grantplus <telegram_user_id> <dagen>"
+GRANTPLUS_SUCCESS = "✅ Plus toegekend aan gebruiker {user_id} tot {expires}."
 
 
 def status_text(plan: str, product_count: int, expires_text: Optional[str], is_recurring: bool) -> str:
