@@ -74,6 +74,8 @@ SCHEMA_STATEMENTS = [
     """,
     "CREATE INDEX IF NOT EXISTS idx_price_points_product_checked ON price_points(product_id, checked_at)",
     "CREATE INDEX IF NOT EXISTS idx_products_active_checked ON products(active, last_checked_at)",
+    "ALTER TABLE products ADD COLUMN IF NOT EXISTS parent_product_id BIGINT NULL REFERENCES products(id)",
+    "CREATE INDEX IF NOT EXISTS idx_products_parent ON products(parent_product_id)",
 ]
 
 
@@ -148,7 +150,19 @@ async def get_expired_plus_users() -> list[asyncpg.Record]:
 async def count_active_products(user_id: int) -> int:
     async with pool().acquire() as conn:
         return await conn.fetchval(
-            "SELECT count(*) FROM products WHERE user_id = $1 AND active = true", user_id
+            "SELECT count(*) FROM products WHERE user_id = $1 AND active = true AND parent_product_id IS NULL",
+            user_id,
+        )
+
+
+async def count_product_urls(product_id: int) -> int:
+    async with pool().acquire() as conn:
+        return await conn.fetchval(
+            """
+            SELECT count(*) FROM products
+            WHERE (id = $1 OR parent_product_id = $1) AND active = true
+            """,
+            product_id,
         )
 
 
@@ -191,6 +205,53 @@ async def create_product(
             return row
 
 
+async def add_product_url(
+    *,
+    product_id: int,
+    user_id: int,
+    url: str,
+    domain: str,
+    name: Optional[str],
+    currency: str,
+    strategy: str,
+    price: Decimal,
+    in_stock: Optional[bool],
+) -> Optional[asyncpg.Record]:
+    """Attach a new store URL as a child row of an owned root product."""
+    async with pool().acquire() as conn:
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                """
+                INSERT INTO products (
+                    user_id, parent_product_id, url, domain, name, currency, extraction_strategy,
+                    last_price, last_checked_at, last_check_status
+                )
+                SELECT $1, $2, $3, $4, $5, $6, $7, $8, now(), 'ok'
+                WHERE EXISTS (
+                    SELECT 1 FROM products WHERE id = $2 AND user_id = $1 AND parent_product_id IS NULL
+                )
+                RETURNING *
+                """,
+                user_id,
+                product_id,
+                url,
+                domain,
+                name,
+                currency,
+                strategy,
+                price,
+            )
+            if row is None:
+                return None
+            await conn.execute(
+                "INSERT INTO price_points (product_id, price, in_stock) VALUES ($1, $2, $3)",
+                row["id"],
+                price,
+                in_stock,
+            )
+            return row
+
+
 async def get_product(product_id: int) -> Optional[asyncpg.Record]:
     async with pool().acquire() as conn:
         return await conn.fetchrow("SELECT * FROM products WHERE id = $1", product_id)
@@ -203,17 +264,47 @@ async def get_owned_product(product_id: int, user_id: int) -> Optional[asyncpg.R
         )
 
 
+async def get_child_urls(product_id: int) -> list[asyncpg.Record]:
+    async with pool().acquire() as conn:
+        return await conn.fetch(
+            """
+            SELECT * FROM products
+            WHERE parent_product_id = $1 AND active = true
+            ORDER BY created_at ASC
+            """,
+            product_id,
+        )
+
+
+async def url_exists_for_user(user_id: int, url: str) -> Optional[asyncpg.Record]:
+    async with pool().acquire() as conn:
+        return await conn.fetchrow(
+            "SELECT * FROM products WHERE user_id = $1 AND url = $2 AND active = true LIMIT 1",
+            user_id,
+            url,
+        )
+
+
 async def list_products(user_id: int) -> list[asyncpg.Record]:
     async with pool().acquire() as conn:
         return await conn.fetch(
             """
-            SELECT p.*, (
-                SELECT price FROM price_points
-                WHERE product_id = p.id
-                ORDER BY checked_at ASC LIMIT 1
-            ) AS first_price
+            SELECT p.*,
+                (
+                    SELECT price FROM price_points
+                    WHERE product_id = p.id
+                    ORDER BY checked_at ASC LIMIT 1
+                ) AS first_price,
+                (
+                    SELECT MIN(last_price) FROM products
+                    WHERE id = p.id OR parent_product_id = p.id
+                ) AS cheapest_price,
+                (
+                    SELECT count(*) FROM products
+                    WHERE (id = p.id OR parent_product_id = p.id) AND active = true
+                ) AS store_count
             FROM products p
-            WHERE p.user_id = $1 AND p.active = true
+            WHERE p.user_id = $1 AND p.active = true AND p.parent_product_id IS NULL
             ORDER BY p.created_at ASC
             """,
             user_id,
@@ -231,23 +322,52 @@ async def set_target_price(product_id: int, user_id: int, target_price: Decimal)
 
 
 async def deactivate_product(product_id: int, user_id: int) -> bool:
+    """Deactivate a product and, if it's a group root, all of its child stores."""
     async with pool().acquire() as conn:
-        row = await conn.fetchrow(
-            "UPDATE products SET active = false WHERE id = $1 AND user_id = $2 RETURNING id",
+        rows = await conn.fetch(
+            """
+            UPDATE products SET active = false
+            WHERE user_id = $2 AND (id = $1 OR parent_product_id = $1)
+            RETURNING id
+            """,
             product_id,
             user_id,
         )
-        return row is not None
+        return len(rows) > 0
+
+
+async def remove_product_url(product_id: int, user_id: int) -> Optional[asyncpg.Record]:
+    """Deactivate a single child store URL. Never removes a group root."""
+    async with pool().acquire() as conn:
+        return await conn.fetchrow(
+            """
+            UPDATE products SET active = false
+            WHERE id = $1 AND user_id = $2 AND parent_product_id IS NOT NULL
+            RETURNING id, domain
+            """,
+            product_id,
+            user_id,
+        )
 
 
 async def get_due_products(free_hours: int, plus_hours: int) -> list[asyncpg.Record]:
-    """Products due for a check: Plus owners on `plus_hours`, free owners (only
-    their single most-recently-added active product) on `free_hours`."""
+    """Rows (roots or child store URLs) due for a check: Plus owners on
+    `plus_hours`, free owners (only the stores under their single
+    most-recently-added active root product) on `free_hours`."""
     async with pool().acquire() as conn:
         return await conn.fetch(
             """
-            SELECT p.*
+            SELECT p.*,
+                COALESCE(root.name, p.name) AS group_name,
+                (
+                    p.parent_product_id IS NOT NULL
+                    OR EXISTS (
+                        SELECT 1 FROM products c
+                        WHERE c.parent_product_id = p.id AND c.active = true
+                    )
+                ) AS is_multi_store
             FROM products p
+            LEFT JOIN products root ON root.id = p.parent_product_id
             JOIN users u ON u.telegram_user_id = p.user_id
             WHERE p.active = true
             AND (
@@ -258,9 +378,9 @@ async def get_due_products(free_hours: int, plus_hours: int) -> list[asyncpg.Rec
                 OR
                 (
                     u.plan = 'free'
-                    AND p.id = (
+                    AND COALESCE(p.parent_product_id, p.id) = (
                         SELECT id FROM products p2
-                        WHERE p2.user_id = p.user_id AND p2.active = true
+                        WHERE p2.user_id = p.user_id AND p2.active = true AND p2.parent_product_id IS NULL
                         ORDER BY p2.created_at DESC LIMIT 1
                     )
                     AND (p.last_checked_at IS NULL OR p.last_checked_at < now() - ($1 * INTERVAL '1 hour'))

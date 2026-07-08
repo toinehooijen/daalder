@@ -42,8 +42,10 @@ HELP = (
     "1. Plak een productlink in dit gesprek.\n"
     "2. Ik zoek de huidige prijs op en onthoud die.\n"
     "3. Zodra ik een prijsdaling zie, krijg je een bericht.\n\n"
-    "<b>Gratis</b>: 1 product volgen, elke 24 uur gecontroleerd.\n"
-    "<b>Daalder Plus</b> (€2/mnd of €12/jr): onbeperkt producten, elke 4 uur gecontroleerd.\n\n"
+    "Volg je dezelfde deal bij meerdere winkels? Voeg extra links toe via "
+    "➕ Andere winkel toevoegen — ik toon dan steeds de laagste prijs.\n\n"
+    "<b>Gratis</b>: 1 product volgen (max. 2 winkels), elke 24 uur gecontroleerd.\n"
+    "<b>Daalder Plus</b> (€2/mnd of €12/jr): onbeperkt producten en winkels, elke 4 uur gecontroleerd.\n\n"
     "<b>Commando's</b>\n"
     "/lijst — jouw gevolgde producten\n"
     "/status — jouw abonnement\n"
@@ -90,6 +92,38 @@ ADD_FAILED_ERROR = "😕 Er ging iets mis bij het ophalen van deze pagina. Probe
 
 FREE_LIMIT_UPSELL = "Gratis volg je 1 product. Met Daalder Plus volg je er onbeperkt — €2/mnd of €12/jr."
 
+# --- adding an extra store to an existing product -------------------------------
+
+ADD_URL_PROMPT = "Plak de link van dezelfde deal bij een andere winkel. 🏬"
+ADD_URL_NO_URL_HINT = (
+    "Ik zag geen productlink in je bericht 🤔 Plak een volledige link "
+    "(beginnend met http:// of https://), of stuur /lijst om te stoppen."
+)
+FREE_STORE_LIMIT_UPSELL = (
+    "Gratis volg je maximaal 2 winkels per product. Met Daalder Plus voeg je er onbeperkt toe — "
+    "€2/mnd of €12/jr."
+)
+
+
+def url_already_tracked(name: str) -> str:
+    return f"Deze link volg je al bij <b>{name}</b>."
+
+
+def url_added(domain: str, price_text: str) -> str:
+    return f"✅ {domain} toegevoegd — {price_text}. Ik laat het weten zodra een van de winkels goedkoper wordt. 📉"
+
+
+REMOVE_URL_ONLY_ROOT_HINT = "Dit is de winkel waarmee je begon. Gebruik de knop 🗑 Verwijderen om het hele product te stoppen."
+
+
+def remove_url_done(domain: str) -> str:
+    return f"🗑 {domain} niet meer gevolgd."
+
+
+def store_list_item(domain: str, price_text: str) -> str:
+    return f"🏬 <b>{escape(domain)}</b>\n{price_text}"
+
+
 # --- buttons ---------------------------------------------------------------------
 
 BTN_UPGRADE = "⭐️ Upgraden"
@@ -99,6 +133,8 @@ BTN_REMOVE = "🗑 Verwijderen"
 BTN_DETAIL = "📊 Bekijken"
 BTN_REMOVE_CONFIRM = "🗑 Ja, verwijderen"
 BTN_REMOVE_CANCEL = "Annuleren"
+BTN_ADD_STORE = "➕ Andere winkel toevoegen"
+BTN_REMOVE_STORE = "🗑 Deze winkel niet meer volgen"
 
 # --- /lijst ------------------------------------------------------------------------
 
@@ -107,9 +143,10 @@ LIST_INTRO = "<b>Jouw producten</b> 📦"
 LIST_ITEM_BLOCKED = "⚠️ tijdelijk niet te checken"
 
 
-def list_item(name: str, price_text: str, arrow: str, delta_text: str) -> str:
+def list_item(name: str, price_text: str, arrow: str, delta_text: str, store_count: int = 1) -> str:
     delta = f" {arrow} {delta_text}" if arrow else ""
-    return f"📦 <b>{name}</b>\n{price_text}{delta}"
+    stores = f" ({store_count} winkels)" if store_count > 1 else ""
+    return f"📦 <b>{name}</b>{stores}\n{price_text}{delta}"
 
 
 # --- product detail / chart -----------------------------------------------------------
@@ -152,8 +189,9 @@ REMOVE_CANCELLED = "Oké, ik blijf dit product volgen."
 # --- drop alerts --------------------------------------------------------------------------------
 
 
-def drop_alert(name: str, old_price: str, new_price: str, url: str) -> str:
-    return f"📉 <b>{name}</b> is gedaald!\nWas {old_price} → nu {new_price}\n{url}"
+def drop_alert(name: str, old_price: str, new_price: str, url: str, domain: Optional[str] = None) -> str:
+    store_suffix = f" bij {escape(domain)}" if domain else ""
+    return f"📉 <b>{name}</b> is gedaald{store_suffix}!\nWas {old_price} → nu {new_price}\n{url}"
 
 
 PLAN_LAPSED = (

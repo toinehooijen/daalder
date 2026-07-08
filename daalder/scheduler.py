@@ -92,10 +92,11 @@ async def _check_one_product(context: ContextTypes.DEFAULT_TYPE, product: Any) -
 
 
 async def _send_drop_alert(context: ContextTypes.DEFAULT_TYPE, product: Any, old_price, new_price) -> None:
-    name = texts.escape(product["name"] or texts.UNKNOWN_PRODUCT_NAME)
+    name = texts.escape(product["group_name"] or texts.UNKNOWN_PRODUCT_NAME)
     old_text = texts.format_price(old_price, product["currency"]) if old_price is not None else "?"
     new_text = texts.format_price(new_price, product["currency"])
-    text = texts.drop_alert(name, old_text, new_text, product["url"])
+    domain = product["domain"] if product["is_multi_store"] else None
+    text = texts.drop_alert(name, old_text, new_text, product["url"], domain=domain)
     keyboard = InlineKeyboardMarkup([[InlineKeyboardButton(texts.BTN_CHART, callback_data=f"detail:{product['id']}")]])
     try:
         await context.bot.send_message(product["user_id"], text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
