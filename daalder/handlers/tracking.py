@@ -302,12 +302,23 @@ async def detail_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     prices = await db.get_group_prices(root_id)
     cheapest_text = texts.format_price(prices["cheapest"], currency)
+    cheapest_domain = prices["cheapest_domain"] or ""
     average_text = texts.format_price(prices["average"], currency)
     target_text = (
         texts.format_price(product["target_price"], currency)
         if product["target_price"] is not None
         else texts.TARGET_NOT_SET
     )
+
+    lowest_since_alert = None
+    if product["target_price"] is not None and product["target_price_set_at"] is not None:
+        lowest = await db.get_lowest_price_since(root_id, product["target_price_set_at"])
+        if lowest is not None:
+            lowest_since_alert = (
+                texts.format_price(lowest["price"], currency),
+                lowest["domain"],
+                lowest["checked_at"].strftime("%d-%m-%Y"),
+            )
 
     points = await db.get_group_price_points(root_id)
     series: dict[str, list] = {}
@@ -316,7 +327,14 @@ async def detail_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     chart = render_group_chart(product["name"] or texts.UNKNOWN_PRODUCT_NAME, series)
 
     text = texts.group_detail_text(
-        name, store_lines, cheapest_text, average_text, target_text, enough_data=chart is not None
+        name,
+        store_lines,
+        cheapest_text,
+        cheapest_domain,
+        average_text,
+        target_text,
+        enough_data=chart is not None,
+        lowest_since_alert=lowest_since_alert,
     )
     keyboard = _group_keyboard(root_id, store_count=len(stores))
 
