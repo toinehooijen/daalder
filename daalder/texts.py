@@ -149,9 +149,9 @@ def list_item(name: str, price_text: str, arrow: str, delta_text: str, store_cou
     return f"📦 <b>{name}</b>{stores}\n{price_text}{delta}"
 
 
-# --- product detail / chart -----------------------------------------------------------
+# --- product detail / price progression -----------------------------------------------
 
-CHART_NOT_ENOUGH_DATA = "Nog te weinig data voor een grafiek — kom later terug. 📉"
+CHART_NOT_ENOUGH_DATA = "Nog te weinig data voor een prijsverloop — kom later terug. 📉"
 
 
 def group_detail_text(
@@ -161,8 +161,8 @@ def group_detail_text(
     cheapest_domain: str,
     average_text: str,
     target_text: str,
-    enough_data: bool,
-    lowest_since_alert: Optional[tuple[str, str, str]] = None,
+    lowest_price: Optional[tuple[str, str, str]] = None,
+    sparkline: Optional[str] = None,
 ) -> str:
     lines = [f"📦 <b>{name}</b>", ""]
     single_store = len(stores) <= 1
@@ -175,16 +175,16 @@ def group_detail_text(
         lines.append(f"💰 Goedkoopste winkel: {escape(cheapest_domain)} — {cheapest_text}")
         lines.append(f"📊 Gemiddelde: {average_text}")
     lines.append(f"🎯 Doelprijs: {target_text}")
-    if lowest_since_alert is not None:
-        price_text, domain, date_text = lowest_since_alert
+    if lowest_price is not None:
+        price_text, domain, date_text = lowest_price
         if single_store:
-            lines.append(f"📉 Laagste prijs sinds instellen prijsalert: {price_text} op {date_text}")
+            lines.append(f"📉 Laagste prijs: {price_text} op {date_text}")
         else:
-            lines.append(
-                f"📉 Laagste prijs sinds instellen prijsalert: {price_text} bij {escape(domain)} op {date_text}"
-            )
-    if not enough_data:
-        lines.append("")
+            lines.append(f"📉 Laagste prijs: {price_text} bij {escape(domain)} op {date_text}")
+    lines.append("")
+    if sparkline is not None:
+        lines.append(f"📈 Prijsverloop: <code>{sparkline}</code>")
+    else:
         lines.append(CHART_NOT_ENOUGH_DATA)
     return "\n".join(lines)
 

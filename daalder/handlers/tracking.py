@@ -11,8 +11,8 @@ from telegram.constants import ParseMode
 from telegram.ext import ContextTypes
 
 from daalder import config, db, texts
-from daalder.charts import render_group_chart
 from daalder.scraping import extract_price, get_domain
+from daalder.sparkline import render_price_sparkline
 from daalder.scraping.structured import parse_price_string
 
 logger = logging.getLogger(__name__)
@@ -310,21 +310,18 @@ async def detail_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         else texts.TARGET_NOT_SET
     )
 
-    lowest_since_alert = None
-    if product["target_price"] is not None and product["target_price_set_at"] is not None:
-        lowest = await db.get_lowest_price_since(root_id, product["target_price_set_at"])
-        if lowest is not None:
-            lowest_since_alert = (
-                texts.format_price(lowest["price"], currency),
-                lowest["domain"],
-                lowest["checked_at"].strftime("%d-%m-%Y"),
-            )
-
     points = await db.get_group_price_points(root_id)
-    series: dict[str, list] = {}
-    for point in points:
-        series.setdefault(point["domain"], []).append((point["checked_at"], point["price"]))
-    chart = render_group_chart(product["name"] or texts.UNKNOWN_PRODUCT_NAME, series)
+
+    lowest_price = None
+    if points:
+        lowest_point = min(points, key=lambda p: (p["price"], p["checked_at"]))
+        lowest_price = (
+            texts.format_price(lowest_point["price"], currency),
+            lowest_point["domain"],
+            lowest_point["checked_at"].strftime("%d-%m-%Y"),
+        )
+
+    sparkline = render_price_sparkline([(point["checked_at"], point["price"]) for point in points])
 
     text = texts.group_detail_text(
         name,
@@ -333,20 +330,12 @@ async def detail_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         cheapest_domain,
         average_text,
         target_text,
-        enough_data=chart is not None,
-        lowest_since_alert=lowest_since_alert,
+        lowest_price=lowest_price,
+        sparkline=sparkline,
     )
     keyboard = _group_keyboard(root_id, store_count=len(stores))
 
-    if chart is not None:
-        # Telegram re-encodes photos as JPEG (dropping the alpha channel), which
-        # turns the chart's transparent background opaque white. Sending as a
-        # document preserves the original PNG, transparency included.
-        await query.message.reply_document(
-            document=chart, caption=text, parse_mode=ParseMode.HTML, reply_markup=keyboard
-        )
-    else:
-        await query.message.reply_html(text, reply_markup=keyboard)
+    await query.message.reply_html(text, reply_markup=keyboard)
 
 
 async def _resolve_root(product):

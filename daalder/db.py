@@ -357,24 +357,6 @@ async def get_group_prices(product_id: int) -> asyncpg.Record:
         )
 
 
-async def get_lowest_price_since(product_id: int, since: datetime) -> Optional[asyncpg.Record]:
-    """The lowest recorded price (and where/when) across a group's stores
-    since the given timestamp, e.g. since a price alert was set."""
-    async with pool().acquire() as conn:
-        return await conn.fetchrow(
-            """
-            SELECT pp.price, pr.domain, pp.checked_at
-            FROM price_points pp
-            JOIN products pr ON pr.id = pp.product_id
-            WHERE (pr.id = $1 OR pr.parent_product_id = $1) AND pp.checked_at >= $2
-            ORDER BY pp.price ASC, pp.checked_at ASC
-            LIMIT 1
-            """,
-            product_id,
-            since,
-        )
-
-
 async def get_group_price_points(product_id: int) -> list[asyncpg.Record]:
     async with pool().acquire() as conn:
         return await conn.fetch(
