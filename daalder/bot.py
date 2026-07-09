@@ -36,11 +36,13 @@ async def post_init(application: Application) -> None:
     await db.init_pool(config.DATABASE_URL)
     await db.init_schema()
     fetch_module.init_client()
+    await fetch_module.init_browser()
     logger.info("Daalder gestart en verbonden met de database.")
 
 
 async def post_shutdown(application: Application) -> None:
     await fetch_module.close_client()
+    await fetch_module.close_browser()
     await llm_module.close_client()
     await db.close_pool()
     logger.info("Daalder netjes afgesloten.")

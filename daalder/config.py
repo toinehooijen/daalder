@@ -67,3 +67,9 @@ USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 )
+
+# --- browser fallback (anti-bot seam) --------------------------------------------
+
+ENABLE_BROWSER_FALLBACK = os.environ.get("ENABLE_BROWSER_FALLBACK", "true").lower() not in ("0", "false", "")
+BROWSER_TIMEOUT_SECONDS = _get_int("BROWSER_TIMEOUT_SECONDS", 20)
+SCRAPE_PROXY_URL = os.environ.get("SCRAPE_PROXY_URL", "")
