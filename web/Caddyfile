@@ -1,0 +1,13 @@
+:{$PORT} {
+	root * /srv
+	file_server
+	encode gzip
+
+	@assets path /assets/*
+	header @assets Cache-Control "public, max-age=31536000, immutable"
+
+	header X-Content-Type-Options "nosniff"
+	header Referrer-Policy "strict-origin-when-cross-origin"
+
+	try_files {path} /index.html
+}
