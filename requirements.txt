@@ -5,3 +5,4 @@ selectolax>=0.3.21,<0.4
 anthropic>=0.40,<1
 python-dotenv>=1.0,<2
 playwright>=1.47,<2
+playwright-stealth>=2.0.0,<3

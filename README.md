@@ -152,27 +152,41 @@ chokepoint every extraction tier depends on — it returns a `FetchResult`
 HTML was obtained.
 
 `fetch()` tries a plain `httpx` request first. If that comes back blocked
-(403, 429, or a page matching known challenge markers like "checking your
-browser" or "just a moment"), it retries the same URL once through a shared
-headless Chromium instance (Playwright). The browser context carries a few
-countermeasures against headless-Chromium fingerprinting (patched
-`navigator.webdriver`/`plugins`/`languages`, a realistic viewport/timezone
-and `sec-ch-ua` headers, `--disable-blink-features=AutomationControlled`),
-and polls for up to `BROWSER_CHALLENGE_WAIT_SECONDS` for a client-side JS
-challenge to clear instead of a fixed wait. The browser is a lazily-started
-singleton (one process, a fresh `BrowserContext` per request) so it composes
-with the existing `MAX_CONCURRENT_CHECKS` semaphore in `scheduler.py`
-without any extra wiring. If the browser attempt also fails, or the browser
-itself couldn't be started (e.g. binaries missing locally — set
-`ENABLE_BROWSER_FALLBACK=false` to skip it entirely), the fetch is reported
-as `blocked` exactly as before: `last_check_status='blocked'` is set on the
-product and `/lijst` surfaces it as "⚠️ tijdelijk niet te checken" instead
-of failing silently.
+(403, 429, or a page matching known challenge markers), it retries the same
+URL once through a shared headless Chromium instance (Playwright). Markers
+are checked against several bot-management vendors, not just Cloudflare
+("checking your browser", "just a moment"), since large retailers like
+Alltricks commonly run DataDome, Akamai, Imperva/Incapsula, or PerimeterX
+instead — see `_CHALLENGE_MARKERS` in `fetch.py` for the full list per
+vendor. The browser context uses the [`playwright-stealth`](https://pypi.org/project/playwright-stealth/)
+library to patch the much wider set of headless-Chromium tells it checks for
+(WebGL vendor/renderer, `navigator.permissions`, iframe `contentWindow`,
+plugins/mimeTypes parity, etc.) on top of a realistic viewport/timezone and
+`sec-ch-ua` headers, and waits for the network to go idle before polling for
+up to `BROWSER_CHALLENGE_WAIT_SECONDS` for a client-side JS challenge to
+clear. The browser is a lazily-started singleton (one process, a fresh
+`BrowserContext` per request) so it composes with the existing
+`MAX_CONCURRENT_CHECKS` semaphore in `scheduler.py` without any extra
+wiring. If the browser attempt also fails, or the browser itself couldn't be
+started (e.g. binaries missing locally — set `ENABLE_BROWSER_FALLBACK=false`
+to skip it entirely), the fetch is reported as `blocked` exactly as before:
+`last_check_status='blocked'` is set on the product and `/lijst` surfaces it
+as "⚠️ tijdelijk niet te checken" instead of failing silently.
 
-For targets that still block a datacenter-IP headless browser, `fetch.py`
-also accepts an optional `SCRAPE_PROXY_URL` (e.g. a residential-proxy
-provider) applied to the browser context — wiring one up is a config
-change, not a code change.
+Every blocked fetch logs the status code, matched vendor (or "none" if it
+was a bare 403/429 with no challenge page), final URL, and an HTML snippet —
+check the bot's logs after a failed `/toevoegen` to see exactly which of the
+above is happening before changing anything further.
+
+For targets that still block a datacenter-IP headless browser — a bare
+403/429 with no challenge-page markers in the logs is the signature of this
+— `fetch.py` accepts an optional `SCRAPE_PROXY_URL`, applied to the browser
+context, for a **residential or mobile** proxy (a datacenter/VPS proxy gets
+blocked the same way a plain server IP does, so it won't help). Providers
+selling this kind of proxy (e.g. Bright Data, Oxylabs, Smartproxy, IPRoyal)
+typically bill per GB and give you a single endpoint URL in the form
+`http://username:password@proxy-host:port` (or `socks5://...`) — set that as
+`SCRAPE_PROXY_URL` and no code change is needed, the wiring already exists.
 
 ## Payments: Telegram Stars today, Mollie/iDEA later
 

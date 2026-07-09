@@ -13,11 +13,12 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
-from typing import Optional
+from typing import Dict, Optional, Tuple
 
 import httpx
 from playwright.async_api import Browser, Playwright, async_playwright
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
+from playwright_stealth import Stealth
 
 from daalder import config
 
@@ -29,15 +30,26 @@ _playwright: Optional[Playwright] = None
 _browser: Optional[Browser] = None
 _browser_unavailable = False
 
-_CHALLENGE_MARKERS = (
-    "checking your browser",
-    "cf-browser-verification",
-    "just a moment",
-    "captcha",
-    "attention required",
-    "access denied",
-    "verify you are human",
-)
+_STEALTH = Stealth(navigator_languages_override=("nl-NL", "nl"))
+
+# Marker strings for known bot-management vendors, keyed by vendor name so a
+# block can be logged as "which vendor" rather than a bare true/false. A
+# generic bucket covers markers not tied to one specific vendor. Alltricks
+# and other large retailers may run any of these, not just Cloudflare.
+_CHALLENGE_MARKERS: Dict[str, Tuple[str, ...]] = {
+    "cloudflare": (
+        "checking your browser",
+        "cf-browser-verification",
+        "just a moment",
+        "attention required",
+        "verify you are human",
+    ),
+    "datadome": ("datadome", "geo.captcha-delivery.com"),
+    "imperva": ("_incapsula_resource", "incapsula", "incident id"),
+    "perimeterx": ("perimeterx", "px-captcha", "human challenge"),
+    "akamai": ("akamai", "ak_bmsc"),
+    "generic": ("captcha", "access denied"),
+}
 
 # Headers a real Chrome/124 desktop browser sends on every navigation, to match
 # the User-Agent in config.USER_AGENT. Cloudflare-style bot management flags a
@@ -48,20 +60,6 @@ _BROWSER_EXTRA_HEADERS = {
     "sec-ch-ua-platform": '"Windows"',
     "upgrade-insecure-requests": "1",
 }
-
-# Patches the handful of headless-Chromium tells (navigator.webdriver, a
-# missing window.chrome, empty plugins/languages) that bot-management edges
-# like Cloudflare check for before a real JS challenge is even evaluated.
-_STEALTH_INIT_SCRIPT = """
-Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-window.chrome = window.chrome || { runtime: {} };
-Object.defineProperty(navigator, 'plugins', {
-    get: () => [1, 2, 3, 4, 5].map(() => ({ name: 'Chrome PDF Plugin' })),
-});
-Object.defineProperty(navigator, 'languages', {
-    get: () => ['nl-NL', 'nl', 'en-US', 'en'],
-});
-"""
 
 
 def init_client() -> httpx.AsyncClient:
@@ -96,9 +94,35 @@ class FetchResult:
     error: Optional[str] = None
 
 
-def _looks_like_challenge(html: str) -> bool:
+def _detect_challenge_vendor(html: str) -> Optional[str]:
     sample = html[:4000].lower()
-    return any(marker in sample for marker in _CHALLENGE_MARKERS)
+    for vendor, markers in _CHALLENGE_MARKERS.items():
+        if any(marker in sample for marker in markers):
+            return vendor
+    return None
+
+
+def _looks_like_challenge(html: str) -> bool:
+    return _detect_challenge_vendor(html) is not None
+
+
+def _snippet(html: Optional[str]) -> str:
+    if not html:
+        return ""
+    return html[:300].replace("\n", " ").replace("\r", " ")
+
+
+def _log_blocked(source: str, url: str, status_code: Optional[int], html: Optional[str], final_url: str) -> None:
+    vendor = _detect_challenge_vendor(html) if html else None
+    logger.info(
+        "Geblokkeerd (%s) voor %s: status=%s vendor=%s final_url=%s snippet=%r",
+        source,
+        url,
+        status_code,
+        vendor or ("none" if html else "no_html"),
+        final_url,
+        _snippet(html),
+    )
 
 
 async def init_browser() -> Optional[Browser]:
@@ -110,7 +134,11 @@ async def init_browser() -> Optional[Browser]:
     browser on every blocked fetch.
     """
     global _playwright, _browser, _browser_unavailable
-    if _browser_unavailable or not config.ENABLE_BROWSER_FALLBACK:
+    if not config.ENABLE_BROWSER_FALLBACK:
+        logger.info("Browser-fallback uitgeschakeld via config (ENABLE_BROWSER_FALLBACK=false)")
+        return None
+    if _browser_unavailable:
+        logger.info("Browser-fallback overgeslagen: eerdere start is mislukt")
         return None
     if _browser is not None:
         return _browser
@@ -159,12 +187,12 @@ async def _fetch_with_browser(url: str) -> FetchResult:
         context_kwargs["proxy"] = {"server": config.SCRAPE_PROXY_URL}
 
     context = await browser.new_context(**context_kwargs)
-    await context.add_init_script(_STEALTH_INIT_SCRIPT)
+    await _STEALTH.apply_stealth_async(context)
     try:
         page = await context.new_page()
         try:
             response = await page.goto(
-                url, timeout=config.BROWSER_TIMEOUT_SECONDS * 1000, wait_until="domcontentloaded"
+                url, timeout=config.BROWSER_TIMEOUT_SECONDS * 1000, wait_until="networkidle"
             )
         except PlaywrightTimeoutError:
             logger.warning("Browser-fetch timeout voor %s", url)
@@ -183,6 +211,10 @@ async def _fetch_with_browser(url: str) -> FetchResult:
 
         blocked = (status_code in (403, 429) if status_code is not None else False) or _looks_like_challenge(html)
         if blocked or (status_code is not None and status_code >= 400):
+            if blocked:
+                _log_blocked("browser", url, status_code, html, final_url)
+            else:
+                logger.warning("Browser-fetch mislukt voor %s: HTTP %s", url, status_code)
             return FetchResult(
                 ok=False,
                 status_code=status_code,
@@ -219,9 +251,11 @@ async def fetch(url: str) -> FetchResult:
             error=f"HTTP {response.status_code}",
         )
         if not blocked:
+            logger.warning("httpx-fetch mislukt voor %s: HTTP %s", url, response.status_code)
             return httpx_result
 
-        logger.info("httpx-fetch geblokkeerd voor %s (status=%s), val terug op browser", url, response.status_code)
+        _log_blocked("httpx", url, response.status_code, response.text, str(response.url))
+        logger.info("httpx-fetch geblokkeerd voor %s, val terug op browser", url)
         browser_result = await _fetch_with_browser(url)
         return browser_result if browser_result.ok else httpx_result
 
