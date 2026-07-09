@@ -44,3 +44,4 @@ def get_adapter(domain: str) -> Optional[AdapterFunc]:
 
 
 from daalder.scraping.adapters import _template  # noqa: E402,F401
+from daalder.scraping.adapters import rosebikes  # noqa: E402,F401
