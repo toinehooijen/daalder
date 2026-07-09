@@ -106,6 +106,19 @@ over - Welke gegevens ik bewaar
 There is nothing to expose publicly — a worker service with an outbound
 connection to `api.telegram.org` is the entire deployment.
 
+### Troubleshooting: crash on startup connecting to `127.0.0.1`/`::1`:5432
+
+If the worker crashes with an `OSError: Multiple exceptions` from asyncpg
+trying to connect to `127.0.0.1` or `::1` on port 5432, `DATABASE_URL` has
+fallen back to a localhost default instead of the Postgres plugin's real
+connection string. Check that:
+
+- The PostgreSQL plugin is actually added to the Railway project.
+- The worker service's Variables tab has `DATABASE_URL` referencing the
+  Postgres plugin (e.g. `${{Postgres.DATABASE_URL}}`), not a hardcoded
+  localhost value.
+- The service was redeployed after adding/linking the variable.
+
 ## The scraping pipeline
 
 `daalder.scraping.extract_price(url)` tries three tiers in order and returns

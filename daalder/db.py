@@ -6,6 +6,7 @@ import logging
 from datetime import datetime
 from decimal import Decimal
 from typing import Optional
+from urllib.parse import urlparse
 
 import asyncpg
 
@@ -13,11 +14,28 @@ logger = logging.getLogger(__name__)
 
 _pool: Optional[asyncpg.Pool] = None
 
+_LOCALHOST_NAMES = {"localhost", "127.0.0.1", "::1"}
+
 
 async def init_pool(database_url: str) -> None:
     global _pool
-    if _pool is None:
+    if _pool is not None:
+        return
+    try:
         _pool = await asyncpg.create_pool(dsn=database_url, min_size=1, max_size=10)
+    except OSError as exc:
+        host = urlparse(database_url).hostname
+        hint = (
+            " DATABASE_URL wijst naar localhost, wat in productie bijna altijd "
+            "betekent dat de PostgreSQL-plugin niet is toegevoegd of niet is "
+            "gekoppeld aan deze service (Railway: Variables-tab van de worker "
+            "service moet DATABASE_URL van de Postgres-plugin overnemen)."
+            if host in _LOCALHOST_NAMES
+            else ""
+        )
+        raise RuntimeError(
+            f"Kan geen verbinding maken met de database op {host}:{urlparse(database_url).port}.{hint}"
+        ) from exc
 
 
 async def close_pool() -> None:
