@@ -17,6 +17,7 @@ from telegram.ext import (
 )
 
 from daalder import config, db, scheduler
+from daalder.handlers import admin as admin_handlers
 from daalder.handlers import payments as payment_handlers
 from daalder.handlers import start as start_handlers
 from daalder.handlers import tracking as tracking_handlers
@@ -72,6 +73,7 @@ def build_application() -> Application:
     application.add_handler(CommandHandler("paysupport", payment_handlers.paysupport_command))
     application.add_handler(CommandHandler("refund", payment_handlers.refund_command))
     application.add_handler(CommandHandler("grantplus", payment_handlers.grantplus_command))
+    application.add_handler(CommandHandler("gebruikers", admin_handlers.users_command))
 
     application.add_handler(CallbackQueryHandler(tracking_handlers.detail_callback, pattern=r"^detail:\d+$"))
     application.add_handler(CallbackQueryHandler(tracking_handlers.target_prompt_callback, pattern=r"^target:\d+$"))
