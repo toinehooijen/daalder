@@ -29,7 +29,7 @@ daalder/
     payments.py        /upgrade, /status, /paysupport, Stars invoices + payment callbacks
   scraping/
     __init__.py        extract_price() orchestrator (tier1 -> tier2 -> tier3)
-    fetch.py            shared httpx client — the anti-bot seam (see below)
+    fetch.py            shared httpx + Playwright-browser fetch — the anti-bot seam (see below)
     structured.py       Tier 1: JSON-LD / OpenGraph / microdata
     adapters/
       __init__.py       Tier 2: per-domain adapter registry
@@ -61,6 +61,7 @@ constants) has a sane default and can be tuned via env vars.
 python3.12 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+playwright install chromium   # browser-fallback dependency, see below
 
 createdb daalder   # or point DATABASE_URL at any Postgres instance
 cp .env.example .env
@@ -96,7 +97,9 @@ over - Welke gegevens ik bewaar
    Variables tab.
 4. Railway detects the `Procfile` and runs `python -m daalder.bot` as a
    **worker** (no public port, no HTTP server — this is polling mode, so
-   that's correct).
+   that's correct). `nixpacks.toml` runs `playwright install --with-deps
+   chromium` during the build so the browser fallback (see below) has a
+   browser to launch.
 5. Deploy. Watch the logs for `Daalder gestart en verbonden met de
    database.`
 
@@ -140,16 +143,31 @@ Never commit an adapter with guessed selectors — a wrong selector can
 silently report a wrong price, which is worse than falling through to the
 LLM tier.
 
-### The anti-bot seam (not built yet, on purpose)
+### The anti-bot seam
 
-Hard targets like Amazon or Zalando will block a plain `httpx` client (403,
-429, or a JS challenge page). `fetch.py` is the single chokepoint every
-extraction tier depends on — it returns a `FetchResult` (ok / blocked /
-html / status), and nothing above it knows or cares how the HTML was
-obtained. When a Playwright + residential-proxy backend is needed, it's a
-change to the body of `fetch()` only. Until then, a blocked fetch sets
-`last_check_status='blocked'` on the product and `/lijst` surfaces it as
-"⚠️ tijdelijk niet te checken" instead of failing silently.
+Hard targets like Amazon, Zalando, or Alltricks can block a plain `httpx`
+client (403, 429, or a JS challenge page). `fetch.py` is the single
+chokepoint every extraction tier depends on — it returns a `FetchResult`
+(ok / blocked / html / status), and nothing above it knows or cares how the
+HTML was obtained.
+
+`fetch()` tries a plain `httpx` request first. If that comes back blocked
+(403, 429, or a page matching known challenge markers like "checking your
+browser" or "just a moment"), it retries the same URL once through a shared
+headless Chromium instance (Playwright), which resolves most client-side JS
+challenges. The browser is a lazily-started singleton (one process, a fresh
+`BrowserContext` per request) so it composes with the existing
+`MAX_CONCURRENT_CHECKS` semaphore in `scheduler.py` without any extra
+wiring. If the browser attempt also fails, or the browser itself couldn't
+be started (e.g. binaries missing locally — set `ENABLE_BROWSER_FALLBACK=false`
+to skip it entirely), the fetch is reported as `blocked` exactly as before:
+`last_check_status='blocked'` is set on the product and `/lijst` surfaces it
+as "⚠️ tijdelijk niet te checken" instead of failing silently.
+
+For targets that still block a datacenter-IP headless browser, `fetch.py`
+also accepts an optional `SCRAPE_PROXY_URL` (e.g. a residential-proxy
+provider) applied to the browser context — wiring one up is a config
+change, not a code change.
 
 ## Payments: Telegram Stars today, Mollie/iDEA later
 
@@ -219,8 +237,9 @@ is set, pings the admin directly in Telegram.
 
 ## Out of scope for this phase
 
-- Playwright / residential proxies for hard anti-bot targets (seam is in
-  place in `fetch.py`, not implemented).
+- A residential-proxy backend for anti-bot targets the headless-browser
+  fallback still can't get past (seam is in place via `SCRAPE_PROXY_URL`
+  in `fetch.py`, no provider wired in).
 - Mollie/iDEAL payments (seam is in place via `grant_plus`/`revoke_plus`,
   not implemented — Stars only).
 - Any web frontend (the marketing/landing page is a separate static site,
