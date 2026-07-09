@@ -125,6 +125,9 @@ def remove_store_prompt() -> str:
     return "Welke winkel wil je niet meer volgen?"
 
 
+REFRESHING_TOAST = "🔄 Prijs verversen…"
+
+
 # --- buttons ---------------------------------------------------------------------
 
 BTN_UPGRADE = "⭐️ Upgraden"
@@ -135,6 +138,7 @@ BTN_REMOVE_CONFIRM = "🗑 Ja, verwijderen"
 BTN_REMOVE_CANCEL = "Annuleren"
 BTN_ADD_STORE = "➕ Andere winkel toevoegen"
 BTN_REMOVE_STORE_PROMPT = "🗑 Winkel verwijderen"
+BTN_REFRESH = "🔄 Prijs verversen"
 
 # --- /lijst ------------------------------------------------------------------------
 

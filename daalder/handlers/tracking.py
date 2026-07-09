@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from typing import Optional
@@ -28,7 +29,10 @@ def _extract_url(text: str) -> Optional[str]:
 
 
 def _group_keyboard(product_id: int, store_count: int) -> InlineKeyboardMarkup:
-    rows = [[InlineKeyboardButton(texts.BTN_ADD_STORE, callback_data=f"addurl:{product_id}")]]
+    rows = [
+        [InlineKeyboardButton(texts.BTN_REFRESH, callback_data=f"refresh:{product_id}")],
+        [InlineKeyboardButton(texts.BTN_ADD_STORE, callback_data=f"addurl:{product_id}")],
+    ]
     if store_count > 1:
         rows.append(
             [InlineKeyboardButton(texts.BTN_REMOVE_STORE_PROMPT, callback_data=f"rmstore_prompt:{product_id}")]
@@ -269,17 +273,11 @@ async def list_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await update.message.reply_html(line, reply_markup=keyboard)
 
 
-async def detail_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    query = update.callback_query
-    await query.answer()
-    product_id = int(query.data.split(":", 1)[1])
-    user_id = update.effective_user.id
-
+async def _render_detail(product_id: int, user_id: int) -> tuple[Optional[str], Optional[InlineKeyboardMarkup]]:
     product = await db.get_owned_product(product_id, user_id)
     product = await _resolve_root(product)
     if product is None:
-        await query.message.reply_html(texts.PRODUCT_NOT_FOUND)
-        return
+        return None, None
 
     root_id = product["id"]
     name = texts.escape(product["name"] or texts.UNKNOWN_PRODUCT_NAME)
@@ -331,8 +329,66 @@ async def detail_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         sparkline=sparkline,
     )
     keyboard = _group_keyboard(root_id, store_count=len(stores))
+    return text, keyboard
+
+
+async def detail_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    product_id = int(query.data.split(":", 1)[1])
+    user_id = update.effective_user.id
+
+    text, keyboard = await _render_detail(product_id, user_id)
+    if text is None:
+        await query.message.reply_html(texts.PRODUCT_NOT_FOUND)
+        return
 
     await query.message.reply_html(text, reply_markup=keyboard)
+
+
+async def _refresh_store(store) -> None:
+    try:
+        result = await extract_price(store["url"])
+    except Exception:
+        logger.exception("extract_price crashte tijdens verversen voor %s", store["url"])
+        return
+    if not result.ok:
+        await db.update_check_result(store["id"], status=result.status)
+        return
+    await db.update_check_result(
+        store["id"],
+        status="ok",
+        price=result.price,
+        currency=result.currency,
+        in_stock=result.in_stock,
+        strategy=result.strategy,
+        name=result.name,
+    )
+
+
+async def refresh_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    product_id = int(query.data.split(":", 1)[1])
+    user_id = update.effective_user.id
+
+    product = await db.get_owned_product(product_id, user_id)
+    product = await _resolve_root(product)
+    if product is None:
+        await query.answer()
+        await query.message.reply_html(texts.PRODUCT_NOT_FOUND)
+        return
+
+    await query.answer(texts.REFRESHING_TOAST)
+
+    root_id = product["id"]
+    children = await db.get_child_urls(root_id)
+    stores = [product] + list(children)
+    await asyncio.gather(*(_refresh_store(store) for store in stores))
+
+    text, keyboard = await _render_detail(root_id, user_id)
+    if text is None:
+        return
+    await query.edit_message_text(text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
 
 
 async def _resolve_root(product):

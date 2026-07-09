@@ -78,6 +78,7 @@ def build_application() -> Application:
     application.add_handler(CommandHandler("gebruikers", admin_handlers.users_command))
 
     application.add_handler(CallbackQueryHandler(tracking_handlers.detail_callback, pattern=r"^detail:\d+$"))
+    application.add_handler(CallbackQueryHandler(tracking_handlers.refresh_callback, pattern=r"^refresh:\d+$"))
     application.add_handler(CallbackQueryHandler(tracking_handlers.target_prompt_callback, pattern=r"^target:\d+$"))
     application.add_handler(CallbackQueryHandler(tracking_handlers.remove_prompt_callback, pattern=r"^remove:\d+$"))
     application.add_handler(CallbackQueryHandler(tracking_handlers.remove_confirm_callback, pattern=r"^remove_yes:\d+$"))
