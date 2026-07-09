@@ -728,6 +728,10 @@ button {
     grid-template-columns: repeat(2, 1fr);
   }
 
+  .feature-grid > :last-child:nth-child(odd) {
+    grid-column: span 2;
+  }
+
   .pricing-grid {
     grid-template-columns: repeat(2, 1fr);
   }
