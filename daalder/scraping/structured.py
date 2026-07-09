@@ -91,6 +91,15 @@ def _offer_price(offer: dict) -> Optional[Decimal]:
             price_raw = spec.get("price")
     if price_raw is None:
         price_raw = offer.get("lowPrice")
+    if isinstance(price_raw, (int, float)):
+        # A JSON number (not a string) is unambiguous - parse_price_string's
+        # comma/dot heuristics are for scraped text and misfire on it (e.g.
+        # 233.9, which JSON renders without the trailing zero, gets its "."
+        # read as a thousands separator and stripped into 2339).
+        try:
+            return Decimal(str(price_raw))
+        except InvalidOperation:
+            return None
     return parse_price_string(price_raw)
 
 
