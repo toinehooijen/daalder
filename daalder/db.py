@@ -173,6 +173,25 @@ async def mark_renewal_reminder_sent(telegram_user_id: int) -> None:
         )
 
 
+async def list_users_with_usage() -> list[asyncpg.Record]:
+    async with pool().acquire() as conn:
+        return await conn.fetch(
+            """
+            SELECT u.*,
+                (
+                    SELECT count(*) FROM products
+                    WHERE user_id = u.telegram_user_id AND active = true AND parent_product_id IS NULL
+                ) AS product_count,
+                (
+                    SELECT count(*) FROM products
+                    WHERE user_id = u.telegram_user_id AND active = true
+                ) AS store_count
+            FROM users u
+            ORDER BY u.created_at DESC
+            """
+        )
+
+
 # --- products ------------------------------------------------------------------
 
 

@@ -296,3 +296,27 @@ def status_text(plan: str, product_count: int, expires_text: Optional[str], is_r
     if plan != "plus":
         lines.append("\nMeer volgen? /upgrade voor Daalder Plus.")
     return "\n".join(lines)
+
+
+# --- /gebruikers (admin) --------------------------------------------------------
+
+
+def users_summary(total: int, plus: int, free: int) -> str:
+    return (
+        "<b>Gebruikersoverzicht</b>\n"
+        f"Totaal: {total} — Plus: {plus} ⭐️ — Gratis: {free}"
+    )
+
+
+def users_row(user) -> str:
+    uid = user["telegram_user_id"]
+    if user["plan"] == "plus":
+        expires = user["plan_expires_at"].strftime("%d-%m-%Y") if user["plan_expires_at"] else "-"
+        plan_text = f"Plus ⭐️ (tot {expires}{', auto' if user['is_recurring'] else ''})"
+    else:
+        plan_text = "Gratis"
+    signup = user["created_at"].strftime("%d-%m-%Y")
+    return (
+        f"<code>{uid}</code> — {plan_text} — "
+        f"{user['product_count']} product(en), {user['store_count']} winkel(s) — sinds {signup}"
+    )
