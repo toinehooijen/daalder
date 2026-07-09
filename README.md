@@ -162,9 +162,11 @@ vendor. The browser context uses the [`playwright-stealth`](https://pypi.org/pro
 library to patch the much wider set of headless-Chromium tells it checks for
 (WebGL vendor/renderer, `navigator.permissions`, iframe `contentWindow`,
 plugins/mimeTypes parity, etc.) on top of a realistic viewport/timezone and
-`sec-ch-ua` headers, and waits for the network to go idle before polling for
-up to `BROWSER_CHALLENGE_WAIT_SECONDS` for a client-side JS challenge to
-clear. The browser is a lazily-started singleton (one process, a fresh
+`sec-ch-ua` headers, and polls for up to `BROWSER_CHALLENGE_WAIT_SECONDS`
+for a client-side JS challenge to clear (deliberately not waiting for
+network-idle: several bot-management vendors poll a verification endpoint
+in a loop, which would prevent the page from ever going idle). The browser
+is a lazily-started singleton (one process, a fresh
 `BrowserContext` per request) so it composes with the existing
 `MAX_CONCURRENT_CHECKS` semaphore in `scheduler.py` without any extra
 wiring. If the browser attempt also fails, or the browser itself couldn't be

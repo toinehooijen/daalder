@@ -30,7 +30,12 @@ _playwright: Optional[Playwright] = None
 _browser: Optional[Browser] = None
 _browser_unavailable = False
 
-_STEALTH = Stealth(navigator_languages_override=("nl-NL", "nl"))
+# chrome_runtime is enabled explicitly: the library defaults it to off, but
+# the previous hand-rolled script always populated window.chrome.runtime,
+# and its absence is one of the oldest headless-Chromium tells.
+_STEALTH = Stealth(navigator_languages_override=("nl-NL", "nl"), chrome_runtime=True)
+
+_GENERIC_VENDOR = "generic"
 
 # Marker strings for known bot-management vendors, keyed by vendor name so a
 # block can be logged as "which vendor" rather than a bare true/false. A
@@ -48,7 +53,7 @@ _CHALLENGE_MARKERS: Dict[str, Tuple[str, ...]] = {
     "imperva": ("_incapsula_resource", "incapsula", "incident id"),
     "perimeterx": ("perimeterx", "px-captcha", "human challenge"),
     "akamai": ("akamai", "ak_bmsc"),
-    "generic": ("captcha", "access denied"),
+    _GENERIC_VENDOR: ("captcha", "access denied"),
 }
 
 # Headers a real Chrome/124 desktop browser sends on every navigation, to match
@@ -94,16 +99,22 @@ class FetchResult:
     error: Optional[str] = None
 
 
-def _detect_challenge_vendor(html: str) -> Optional[str]:
+def _detect_challenge_vendor(html: str, status_code: Optional[int]) -> Optional[str]:
+    """Match known bot-management markers against `html`.
+
+    The generic bucket ("captcha", "access denied") is skipped for a plain
+    200 response: those words are specific enough on an actual challenge
+    page, but a legitimate 200 OK product page (e.g. a security-camera or
+    alarm listing) can contain them in ordinary copy, so only trust them
+    when the status code itself is already suspicious.
+    """
     sample = html[:4000].lower()
     for vendor, markers in _CHALLENGE_MARKERS.items():
+        if vendor == _GENERIC_VENDOR and status_code == 200:
+            continue
         if any(marker in sample for marker in markers):
             return vendor
     return None
-
-
-def _looks_like_challenge(html: str) -> bool:
-    return _detect_challenge_vendor(html) is not None
 
 
 def _snippet(html: Optional[str]) -> str:
@@ -112,8 +123,9 @@ def _snippet(html: Optional[str]) -> str:
     return html[:300].replace("\n", " ").replace("\r", " ")
 
 
-def _log_blocked(source: str, url: str, status_code: Optional[int], html: Optional[str], final_url: str) -> None:
-    vendor = _detect_challenge_vendor(html) if html else None
+def _log_blocked(
+    source: str, url: str, status_code: Optional[int], vendor: Optional[str], html: Optional[str], final_url: str
+) -> None:
     logger.info(
         "Geblokkeerd (%s) voor %s: status=%s vendor=%s final_url=%s snippet=%r",
         source,
@@ -135,10 +147,13 @@ async def init_browser() -> Optional[Browser]:
     """
     global _playwright, _browser, _browser_unavailable
     if not config.ENABLE_BROWSER_FALLBACK:
-        logger.info("Browser-fallback uitgeschakeld via config (ENABLE_BROWSER_FALLBACK=false)")
+        # Debug, not info: this is checked on every blocked fetch, and a
+        # deployment that deliberately disabled the fallback already knows
+        # it's off, so this would otherwise spam the logs on every cycle.
+        logger.debug("Browser-fallback uitgeschakeld via config (ENABLE_BROWSER_FALLBACK=false)")
         return None
     if _browser_unavailable:
-        logger.info("Browser-fallback overgeslagen: eerdere start is mislukt")
+        logger.debug("Browser-fallback overgeslagen: eerdere start is mislukt")
         return None
     if _browser is not None:
         return _browser
@@ -191,28 +206,38 @@ async def _fetch_with_browser(url: str) -> FetchResult:
     try:
         page = await context.new_page()
         try:
+            # domcontentloaded, not networkidle: bot-management challenges
+            # (DataDome/PerimeterX/Akamai) commonly poll a verification
+            # endpoint in a loop, and ordinary pages keep analytics/chat
+            # beacons alive — either can prevent the network from ever
+            # going idle, which would burn the full timeout on every
+            # fallback fetch and skip straight past the challenge-poll
+            # loop below without ever reading a status/html to log.
             response = await page.goto(
-                url, timeout=config.BROWSER_TIMEOUT_SECONDS * 1000, wait_until="networkidle"
+                url, timeout=config.BROWSER_TIMEOUT_SECONDS * 1000, wait_until="domcontentloaded"
             )
         except PlaywrightTimeoutError:
             logger.warning("Browser-fetch timeout voor %s", url)
             return FetchResult(ok=False, status_code=None, html=None, blocked=False, final_url=url, error="browser_timeout")
 
+        status_code = response.status if response is not None else None
+
         # Poll for a client-side JS challenge (e.g. Cloudflare) to resolve,
         # instead of blindly waiting a fixed duration.
         deadline = asyncio.get_event_loop().time() + config.BROWSER_CHALLENGE_WAIT_SECONDS
         html = await page.content()
-        while _looks_like_challenge(html) and asyncio.get_event_loop().time() < deadline:
+        vendor = _detect_challenge_vendor(html, status_code)
+        while vendor is not None and asyncio.get_event_loop().time() < deadline:
             await page.wait_for_timeout(500)
             html = await page.content()
+            vendor = _detect_challenge_vendor(html, status_code)
 
-        status_code = response.status if response is not None else None
         final_url = page.url
 
-        blocked = (status_code in (403, 429) if status_code is not None else False) or _looks_like_challenge(html)
+        blocked = (status_code in (403, 429) if status_code is not None else False) or vendor is not None
         if blocked or (status_code is not None and status_code >= 400):
             if blocked:
-                _log_blocked("browser", url, status_code, html, final_url)
+                _log_blocked("browser", url, status_code, vendor, html, final_url)
             else:
                 logger.warning("Browser-fetch mislukt voor %s: HTTP %s", url, status_code)
             return FetchResult(
@@ -240,7 +265,8 @@ async def fetch(url: str) -> FetchResult:
         logger.warning("Fetch mislukt voor %s: %s", url, exc)
         return FetchResult(ok=False, status_code=None, html=None, blocked=False, final_url=url, error=str(exc))
 
-    blocked = response.status_code in (403, 429) or _looks_like_challenge(response.text)
+    vendor = _detect_challenge_vendor(response.text, response.status_code)
+    blocked = response.status_code in (403, 429) or vendor is not None
     if response.status_code >= 400 or blocked:
         httpx_result = FetchResult(
             ok=False,
@@ -254,7 +280,7 @@ async def fetch(url: str) -> FetchResult:
             logger.warning("httpx-fetch mislukt voor %s: HTTP %s", url, response.status_code)
             return httpx_result
 
-        _log_blocked("httpx", url, response.status_code, response.text, str(response.url))
+        _log_blocked("httpx", url, response.status_code, vendor, response.text, str(response.url))
         logger.info("httpx-fetch geblokkeerd voor %s, val terug op browser", url)
         browser_result = await _fetch_with_browser(url)
         return browser_result if browser_result.ok else httpx_result
