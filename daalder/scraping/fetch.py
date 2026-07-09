@@ -10,6 +10,7 @@ targets is left as a config-only seam (`SCRAPE_PROXY_URL`), not implemented.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from typing import Optional
@@ -37,6 +38,30 @@ _CHALLENGE_MARKERS = (
     "access denied",
     "verify you are human",
 )
+
+# Headers a real Chrome/124 desktop browser sends on every navigation, to match
+# the User-Agent in config.USER_AGENT. Cloudflare-style bot management flags a
+# request missing these as inconsistent with the claimed browser.
+_BROWSER_EXTRA_HEADERS = {
+    "sec-ch-ua": '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+    "sec-ch-ua-mobile": "?0",
+    "sec-ch-ua-platform": '"Windows"',
+    "upgrade-insecure-requests": "1",
+}
+
+# Patches the handful of headless-Chromium tells (navigator.webdriver, a
+# missing window.chrome, empty plugins/languages) that bot-management edges
+# like Cloudflare check for before a real JS challenge is even evaluated.
+_STEALTH_INIT_SCRIPT = """
+Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+window.chrome = window.chrome || { runtime: {} };
+Object.defineProperty(navigator, 'plugins', {
+    get: () => [1, 2, 3, 4, 5].map(() => ({ name: 'Chrome PDF Plugin' })),
+});
+Object.defineProperty(navigator, 'languages', {
+    get: () => ['nl-NL', 'nl', 'en-US', 'en'],
+});
+"""
 
 
 def init_client() -> httpx.AsyncClient:
@@ -92,7 +117,10 @@ async def init_browser() -> Optional[Browser]:
 
     try:
         _playwright = await async_playwright().start()
-        _browser = await _playwright.chromium.launch(headless=True)
+        _browser = await _playwright.chromium.launch(
+            headless=True,
+            args=["--disable-blink-features=AutomationControlled"],
+        )
     except Exception:
         logger.exception("Kon Playwright-browser niet starten; browser-fallback uitgeschakeld")
         _browser_unavailable = True
@@ -120,11 +148,18 @@ async def _fetch_with_browser(url: str) -> FetchResult:
     if browser is None:
         return FetchResult(ok=False, status_code=None, html=None, blocked=True, final_url=url, error="browser_unavailable")
 
-    context_kwargs = {"user_agent": config.USER_AGENT, "locale": "nl-NL"}
+    context_kwargs = {
+        "user_agent": config.USER_AGENT,
+        "locale": "nl-NL",
+        "timezone_id": "Europe/Amsterdam",
+        "viewport": {"width": 1920, "height": 1080},
+        "extra_http_headers": _BROWSER_EXTRA_HEADERS,
+    }
     if config.SCRAPE_PROXY_URL:
         context_kwargs["proxy"] = {"server": config.SCRAPE_PROXY_URL}
 
     context = await browser.new_context(**context_kwargs)
+    await context.add_init_script(_STEALTH_INIT_SCRIPT)
     try:
         page = await context.new_page()
         try:
@@ -135,9 +170,14 @@ async def _fetch_with_browser(url: str) -> FetchResult:
             logger.warning("Browser-fetch timeout voor %s", url)
             return FetchResult(ok=False, status_code=None, html=None, blocked=False, final_url=url, error="browser_timeout")
 
-        # Give a client-side JS challenge (e.g. Cloudflare) a moment to resolve.
-        await page.wait_for_timeout(2000)
+        # Poll for a client-side JS challenge (e.g. Cloudflare) to resolve,
+        # instead of blindly waiting a fixed duration.
+        deadline = asyncio.get_event_loop().time() + config.BROWSER_CHALLENGE_WAIT_SECONDS
         html = await page.content()
+        while _looks_like_challenge(html) and asyncio.get_event_loop().time() < deadline:
+            await page.wait_for_timeout(500)
+            html = await page.content()
+
         status_code = response.status if response is not None else None
         final_url = page.url
 

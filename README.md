@@ -154,15 +154,20 @@ HTML was obtained.
 `fetch()` tries a plain `httpx` request first. If that comes back blocked
 (403, 429, or a page matching known challenge markers like "checking your
 browser" or "just a moment"), it retries the same URL once through a shared
-headless Chromium instance (Playwright), which resolves most client-side JS
-challenges. The browser is a lazily-started singleton (one process, a fresh
-`BrowserContext` per request) so it composes with the existing
-`MAX_CONCURRENT_CHECKS` semaphore in `scheduler.py` without any extra
-wiring. If the browser attempt also fails, or the browser itself couldn't
-be started (e.g. binaries missing locally — set `ENABLE_BROWSER_FALLBACK=false`
-to skip it entirely), the fetch is reported as `blocked` exactly as before:
-`last_check_status='blocked'` is set on the product and `/lijst` surfaces it
-as "⚠️ tijdelijk niet te checken" instead of failing silently.
+headless Chromium instance (Playwright). The browser context carries a few
+countermeasures against headless-Chromium fingerprinting (patched
+`navigator.webdriver`/`plugins`/`languages`, a realistic viewport/timezone
+and `sec-ch-ua` headers, `--disable-blink-features=AutomationControlled`),
+and polls for up to `BROWSER_CHALLENGE_WAIT_SECONDS` for a client-side JS
+challenge to clear instead of a fixed wait. The browser is a lazily-started
+singleton (one process, a fresh `BrowserContext` per request) so it composes
+with the existing `MAX_CONCURRENT_CHECKS` semaphore in `scheduler.py`
+without any extra wiring. If the browser attempt also fails, or the browser
+itself couldn't be started (e.g. binaries missing locally — set
+`ENABLE_BROWSER_FALLBACK=false` to skip it entirely), the fetch is reported
+as `blocked` exactly as before: `last_check_status='blocked'` is set on the
+product and `/lijst` surfaces it as "⚠️ tijdelijk niet te checken" instead
+of failing silently.
 
 For targets that still block a datacenter-IP headless browser, `fetch.py`
 also accepts an optional `SCRAPE_PROXY_URL` (e.g. a residential-proxy
