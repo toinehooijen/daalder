@@ -74,3 +74,24 @@ ENABLE_BROWSER_FALLBACK = os.environ.get("ENABLE_BROWSER_FALLBACK", "true").lowe
 BROWSER_TIMEOUT_SECONDS = _get_int("BROWSER_TIMEOUT_SECONDS", 20)
 BROWSER_CHALLENGE_WAIT_SECONDS = _get_int("BROWSER_CHALLENGE_WAIT_SECONDS", 8)
 SCRAPE_PROXY_URL = os.environ.get("SCRAPE_PROXY_URL", "")
+
+# --- search fallback: Claude web_search tool (Tier 4) -----------------------------
+
+# Used when a site blocks direct scraping entirely (fetch() reports blocked):
+# asks Claude to search the web for the current price instead of giving up.
+ENABLE_SEARCH_FALLBACK = os.environ.get("ENABLE_SEARCH_FALLBACK", "true").lower() not in ("0", "false", "")
+ANTHROPIC_SEARCH_MODEL = os.environ.get("ANTHROPIC_SEARCH_MODEL", ANTHROPIC_MODEL)
+# Basic web_search tool variant; works on any current model tier (the newer
+# dynamic-filtering dated variant requires an Opus-4.6+/Sonnet-4.6+-class model).
+WEB_SEARCH_TOOL_TYPE = os.environ.get("WEB_SEARCH_TOOL_TYPE", "web_search_20250305")
+SEARCH_FALLBACK_MAX_USES = _get_int("SEARCH_FALLBACK_MAX_USES", 3)
+
+# --- store discovery: find other stores via search (Daalder Plus perk) -----------
+
+ENABLE_STORE_DISCOVERY = os.environ.get("ENABLE_STORE_DISCOVERY", "true").lower() not in ("0", "false", "")
+STORE_DISCOVERY_PLUS_ONLY = os.environ.get("STORE_DISCOVERY_PLUS_ONLY", "true").lower() not in ("0", "false", "")
+# Candidates shown per search, and the cumulative cap of stores added via this
+# feature per product (manually-pasted stores are unaffected by this cap).
+STORE_DISCOVERY_MAX_CANDIDATES = _get_int("STORE_DISCOVERY_MAX_CANDIDATES", 5)
+STORE_DISCOVERY_MAX_TOTAL = _get_int("STORE_DISCOVERY_MAX_TOTAL", 5)
+STORE_DISCOVERY_COOLDOWN_HOURS = _get_int("STORE_DISCOVERY_COOLDOWN_HOURS", 24)

@@ -23,6 +23,7 @@ from daalder.handlers import start as start_handlers
 from daalder.handlers import tracking as tracking_handlers
 from daalder.scraping import fetch as fetch_module
 from daalder.scraping import llm as llm_module
+from daalder.scraping import search as search_module
 
 logging.basicConfig(
     level=logging.INFO,
@@ -44,6 +45,7 @@ async def post_shutdown(application: Application) -> None:
     await fetch_module.close_client()
     await fetch_module.close_browser()
     await llm_module.close_client()
+    await search_module.close_client()
     await db.close_pool()
     logger.info("Daalder netjes afgesloten.")
 
@@ -86,6 +88,11 @@ def build_application() -> Application:
     application.add_handler(CallbackQueryHandler(tracking_handlers.remove_url_callback, pattern=r"^rmurl:\d+$"))
     application.add_handler(
         CallbackQueryHandler(tracking_handlers.remove_store_prompt_callback, pattern=r"^rmstore_prompt:\d+$")
+    )
+    application.add_handler(CallbackQueryHandler(tracking_handlers.findstores_callback, pattern=r"^findstores:\d+$"))
+    application.add_handler(CallbackQueryHandler(tracking_handlers.pickstore_callback, pattern=r"^pickstore:\d+:\d+$"))
+    application.add_handler(
+        CallbackQueryHandler(tracking_handlers.stores_cancel_callback, pattern=r"^stores_cancel:\d+$")
     )
     application.add_handler(CallbackQueryHandler(payment_handlers.upgrade_callback, pattern=r"^upgrade_(monthly|annual)$"))
     application.add_handler(CallbackQueryHandler(payment_handlers.go_upgrade_callback, pattern=r"^go_upgrade$"))

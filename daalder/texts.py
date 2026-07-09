@@ -125,6 +125,33 @@ def remove_store_prompt() -> str:
     return "Welke winkel wil je niet meer volgen?"
 
 
+# --- discovering other stores (Daalder Plus) --------------------------------------
+
+FIND_STORES_PLUS_ONLY = (
+    "Andere winkels automatisch laten opzoeken is een Daalder Plus-functie. "
+    "Upgrade voor €2/mnd of €12/jr."
+)
+FIND_STORES_SEARCHING = "🔍 Ik zoek naar andere winkels die dit product verkopen…"
+FIND_STORES_NONE = (
+    "Ik kon geen andere winkels vinden die precies dit product verkopen. Probeer het later nog eens."
+)
+FIND_STORES_ERROR = "😕 Het zoeken naar andere winkels is niet gelukt. Probeer het straks nog eens."
+FIND_STORES_COOLDOWN = "Ik heb hier recent al naar gezocht. Probeer het over een paar uur opnieuw."
+FIND_STORES_MAX_REACHED = (
+    "Je hebt via deze functie al het maximum aantal winkels toegevoegd voor dit product."
+)
+STORE_CANDIDATE_EXPIRED = "Deze zoekresultaten zijn verlopen. Probeer opnieuw via 🔍 Zoek andere winkels."
+
+
+def find_stores_prompt(count: int) -> str:
+    stores_word = "winkel" if count == 1 else "winkels"
+    return f"Ik vond {count} andere {stores_word} die dit product verkopen. Kies welke je wil volgen:"
+
+
+def store_candidate_button_label(domain: str, price_text: str) -> str:
+    return f"🏬 {domain} — {price_text}"
+
+
 # --- buttons ---------------------------------------------------------------------
 
 BTN_UPGRADE = "⭐️ Upgraden"
@@ -135,6 +162,7 @@ BTN_REMOVE_CONFIRM = "🗑 Ja, verwijderen"
 BTN_REMOVE_CANCEL = "Annuleren"
 BTN_ADD_STORE = "➕ Andere winkel toevoegen"
 BTN_REMOVE_STORE_PROMPT = "🗑 Winkel verwijderen"
+BTN_FIND_STORES = "🔍 Zoek andere winkels"
 
 # --- /lijst ------------------------------------------------------------------------
 

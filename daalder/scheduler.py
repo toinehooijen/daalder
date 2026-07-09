@@ -53,7 +53,7 @@ async def check_due_products_job(context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def _check_one_product(context: ContextTypes.DEFAULT_TYPE, product: Any) -> None:
     try:
-        result = await extract_price(product["url"])
+        result = await extract_price(product["url"], name_hint=product["group_name"])
     except Exception:
         logger.exception("Prijscontrole crashte voor product %s (%s)", product["id"], product["domain"])
         try:

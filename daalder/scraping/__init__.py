@@ -16,6 +16,8 @@ from decimal import Decimal
 from typing import Optional
 from urllib.parse import urlparse
 
+from daalder import config
+
 logger = logging.getLogger(__name__)
 
 
@@ -27,7 +29,7 @@ class PriceResult:
     price: Optional[Decimal] = None
     currency: str = "EUR"
     in_stock: Optional[bool] = None
-    strategy: Optional[str] = None  # 'structured' | 'adapter' | 'llm'
+    strategy: Optional[str] = None  # 'structured' | 'adapter' | 'llm' | 'search'
     error: Optional[str] = None
 
 
@@ -36,20 +38,35 @@ def get_domain(url: str) -> str:
     return netloc[4:] if netloc.startswith("www.") else netloc
 
 
-async def extract_price(url: str) -> PriceResult:
-    """Try structured data, then a per-domain adapter, then the LLM fallback."""
+async def extract_price(url: str, *, name_hint: Optional[str] = None) -> PriceResult:
+    """Try structured data, then a per-domain adapter, then the LLM fallback.
+
+    `name_hint` (an already-known product name, if any) is passed through to
+    the Tier 4 search fallback so it has something to search for even when
+    the page can't be fetched at all.
+    """
     # Imported lazily so this module can define PriceResult/get_domain first;
     # the submodules import those back from here at *their* import time, which
     # only happens on first call, once this package is fully initialized.
     from daalder.scraping.adapters import get_adapter
     from daalder.scraping.fetch import fetch
     from daalder.scraping.llm import extract_with_llm
+    from daalder.scraping.search import find_price_via_search
     from daalder.scraping.structured import extract_from_html
 
     fetched = await fetch(url)
     if not fetched.ok:
         status = "blocked" if fetched.blocked else "error"
         logger.info("Fetch niet ok voor %s: status=%s", url, status)
+        if status == "blocked" and config.ENABLE_SEARCH_FALLBACK:
+            domain = get_domain(url)
+            try:
+                search_result = await find_price_via_search(url, domain, name_hint)
+            except Exception:
+                logger.exception("Zoek-fallback crashte voor %s", url)
+                search_result = None
+            if search_result is not None and search_result.ok:
+                return search_result
         return PriceResult(ok=False, status=status, error=fetched.error)
 
     domain = get_domain(fetched.final_url or url)
