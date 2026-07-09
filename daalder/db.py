@@ -97,6 +97,8 @@ SCHEMA_STATEMENTS = [
     "ALTER TABLE products ADD COLUMN IF NOT EXISTS parent_product_id BIGINT NULL REFERENCES products(id)",
     "CREATE INDEX IF NOT EXISTS idx_products_parent ON products(parent_product_id)",
     "ALTER TABLE products ADD COLUMN IF NOT EXISTS target_price_set_at TIMESTAMPTZ NULL",
+    "ALTER TABLE products ADD COLUMN IF NOT EXISTS last_store_search_at TIMESTAMPTZ NULL",
+    "ALTER TABLE products ADD COLUMN IF NOT EXISTS discovered_via_search BOOLEAN NOT NULL DEFAULT false",
 ]
 
 
@@ -282,20 +284,51 @@ async def add_product_url(
     strategy: str,
     price: Decimal,
     in_stock: Optional[bool],
+    discovered_via_search: bool = False,
+    max_discovered: Optional[int] = None,
 ) -> Optional[asyncpg.Record]:
-    """Attach a new store URL as a child row of an owned root product."""
+    """Attach a new store URL as a child row of an owned, active root product.
+
+    `SELECT ... FOR UPDATE` locks the root row for the duration of the
+    transaction, so two near-simultaneous calls for the same product (e.g. a
+    user tapping two "add this discovered store" buttons in quick succession)
+    serialize instead of racing: the second call's count-check below only
+    starts once the first call's transaction has committed. When
+    `discovered_via_search` and `max_discovered` are both set, the discovered-
+    store cap is enforced against that consistent count.
+    """
     async with pool().acquire() as conn:
         async with conn.transaction():
+            root = await conn.fetchrow(
+                """
+                SELECT id FROM products
+                WHERE id = $1 AND user_id = $2 AND parent_product_id IS NULL AND active = true
+                FOR UPDATE
+                """,
+                product_id,
+                user_id,
+            )
+            if root is None:
+                return None
+
+            if discovered_via_search and max_discovered is not None:
+                discovered_count = await conn.fetchval(
+                    """
+                    SELECT count(*) FROM products
+                    WHERE (id = $1 OR parent_product_id = $1) AND active = true AND discovered_via_search = true
+                    """,
+                    product_id,
+                )
+                if discovered_count >= max_discovered:
+                    return None
+
             row = await conn.fetchrow(
                 """
                 INSERT INTO products (
                     user_id, parent_product_id, url, domain, name, currency, extraction_strategy,
-                    last_price, last_checked_at, last_check_status
+                    last_price, last_checked_at, last_check_status, discovered_via_search
                 )
-                SELECT $1, $2, $3, $4, $5, $6, $7, $8, now(), 'ok'
-                WHERE EXISTS (
-                    SELECT 1 FROM products WHERE id = $2 AND user_id = $1 AND parent_product_id IS NULL
-                )
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now(), 'ok', $9)
                 RETURNING *
                 """,
                 user_id,
@@ -306,9 +339,8 @@ async def add_product_url(
                 currency,
                 strategy,
                 price,
+                discovered_via_search,
             )
-            if row is None:
-                return None
             await conn.execute(
                 "INSERT INTO price_points (product_id, price, in_stock) VALUES ($1, $2, $3)",
                 row["id"],
@@ -316,6 +348,44 @@ async def add_product_url(
                 in_stock,
             )
             return row
+
+
+async def count_discovered_stores(product_id: int) -> int:
+    """Count stores added via the discovery feature within a product's group
+    (root + children) — used to enforce STORE_DISCOVERY_MAX_TOTAL, separate
+    from the overall (unlimited-for-Plus) store count."""
+    async with pool().acquire() as conn:
+        return await conn.fetchval(
+            """
+            SELECT count(*) FROM products
+            WHERE (id = $1 OR parent_product_id = $1) AND active = true AND discovered_via_search = true
+            """,
+            product_id,
+        )
+
+
+async def try_claim_store_search(product_id: int, cooldown_hours: int) -> bool:
+    """Atomically check-and-set the discovery cooldown in one statement.
+
+    Returns True (and marks `last_store_search_at = now()`) only if the
+    cooldown had already elapsed. Doing the check and the write in one
+    UPDATE ... WHERE closes the race a separate read-then-write would have:
+    two near-simultaneous button taps for the same product can't both pass
+    the check and trigger two paid web-search calls.
+    """
+    async with pool().acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            UPDATE products
+            SET last_store_search_at = now()
+            WHERE id = $1
+            AND (last_store_search_at IS NULL OR last_store_search_at < now() - ($2 * INTERVAL '1 hour'))
+            RETURNING id
+            """,
+            product_id,
+            cooldown_hours,
+        )
+        return row is not None
 
 
 async def get_product(product_id: int) -> Optional[asyncpg.Record]:
@@ -472,11 +542,27 @@ async def remove_store(product_id: int, user_id: int) -> Optional[asyncpg.Record
                 )
                 return row
 
+            # Carry over the more recent last_store_search_at (rather than
+            # dropping it, which would reset to NULL on promotion) so
+            # removing and re-promoting a store can't be used to bypass the
+            # discovery cooldown.
+            carried_last_search = row["last_store_search_at"]
+            if new_root["last_store_search_at"] is not None and (
+                carried_last_search is None or new_root["last_store_search_at"] > carried_last_search
+            ):
+                carried_last_search = new_root["last_store_search_at"]
+
             await conn.execute(
-                "UPDATE products SET parent_product_id = NULL, target_price = $2, target_price_set_at = $3 WHERE id = $1",
+                """
+                UPDATE products
+                SET parent_product_id = NULL, target_price = $2, target_price_set_at = $3,
+                    last_store_search_at = $4
+                WHERE id = $1
+                """,
                 new_root["id"],
                 row["target_price"],
                 row["target_price_set_at"],
+                carried_last_search,
             )
             await conn.execute(
                 "UPDATE products SET parent_product_id = $1 WHERE parent_product_id = $2",
