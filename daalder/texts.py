@@ -42,7 +42,7 @@ HELP = (
     "1. Plak een productlink in dit gesprek.\n"
     "2. Ik zoek de huidige prijs op en onthoud die.\n"
     "3. Zodra ik een prijsdaling zie, krijg je een bericht.\n\n"
-    "Volg je dezelfde deal bij meerdere winkels? Voeg extra links toe via "
+    "Volg je hetzelfde product bij meerdere winkels? Voeg extra links toe via "
     "➕ Andere winkel toevoegen — ik toon dan steeds de laagste prijs.\n\n"
     "<b>Gratis</b>: 1 product volgen (max. 2 winkels), elke 24 uur gecontroleerd.\n"
     "<b>Daalder Plus</b> (€2/mnd of €12/jr): onbeperkt producten en winkels, elke 4 uur gecontroleerd.\n\n"
@@ -94,7 +94,7 @@ FREE_LIMIT_UPSELL = "Gratis volg je 1 product. Met Daalder Plus volg je er onbep
 
 # --- adding an extra store to an existing product -------------------------------
 
-ADD_URL_PROMPT = "Plak de link van dezelfde deal bij een andere winkel. 🏬"
+ADD_URL_PROMPT = "Plak de link van hetzelfde product bij een andere winkel. 🏬"
 ADD_URL_NO_URL_HINT = (
     "Ik zag geen productlink in je bericht 🤔 Plak een volledige link "
     "(beginnend met http:// of https://), of stuur /lijst om te stoppen."

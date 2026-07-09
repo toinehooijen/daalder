@@ -6,7 +6,7 @@ no web frontend and no separate app.
 
 - Paste a product URL into the chat and Daalder starts tracking it.
 - Add more store URLs to the same product ("➕ Andere winkel toevoegen") to
-  track the same deal across multiple webshops as one group; Daalder shows
+  track the same product across multiple webshops as one group; Daalder shows
   the cheapest current price and still alerts on a drop at any single store.
 - Free: track 1 product (up to 2 stores per product), checked every 24h.
 - **Daalder Plus**: unlimited products and stores per product, checked every
